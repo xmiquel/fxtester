@@ -1,0 +1,39 @@
+schema: spec-driven
+project: fxtester
+strict_tdd: false
+context: |
+  Project: fxtester
+  Workspace status: initial PR 1 implementation staged; PR 2 frontend chart work remains pending.
+  Tech stack: Python 3.14 FastAPI + DuckDB backend, Node 22 Vite frontend scaffold, Docker Compose, and GitHub Actions.
+  Architecture: read-only DuckDB candle-window API with a health-gated Vite placeholder; chart/query UI stays in PR 2.
+  Testing: pytest with pytest-cov, Docker Compose runtime checks, Ruff security rules, mypy, pip-audit, and Semgrep CE are available.
+  Style: Python uses Ruff and strict mypy; frontend is a minimal Vite scaffold with no chart UI in PR 1.
+testing:
+  detected: 2026-07-19
+  runner: pytest
+  layers:
+    unit: true
+    integration: true
+    e2e: false
+  coverage: true
+  quality:
+    linter: ruff
+    type_checker: mypy
+    formatter: false
+rules:
+  proposal:
+    - Include rollback plan for risky changes.
+  specs:
+    - Use Given/When/Then for scenarios.
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY).
+  design:
+    - Document architecture decisions with rationale.
+  tasks:
+    - Group by phase and keep tasks small enough for one session.
+  apply:
+    - Follow existing code patterns.
+    - Do not invent dependencies or stack details.
+  verify:
+    - Prefer automated checks when the project later defines them.
+  archive:
+    - Warn before merging destructive deltas.

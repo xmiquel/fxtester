@@ -1,0 +1,36 @@
+services:
+  backend:
+    image: fxtester-backend:${IMAGE_VERSION:-local}
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+      args:
+        BUILD_REVISION: ${BUILD_REVISION:-local}
+    ports:
+      - "8000:8000"
+    volumes:
+      - type: bind
+        source: ${MARKET_DATABASE_PATH:-D:/repos_2026/98-tstlocal/data/market.duckdb}
+        target: /data/market.duckdb
+        read_only: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/ | grep -Fq '<h1>Trading Terminal</h1>'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

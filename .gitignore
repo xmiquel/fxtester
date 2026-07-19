@@ -1,0 +1,26 @@
+.atl/
+__pycache__/
+*.py[cod]
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+node_modules/
+dist/
+
+# Local runtime data and secrets; tracked example templates remain allowed.
+*.duckdb
+market.duckdb
+.env
+.env.*
+!.env.example
+!.env.*.example
+credentials*.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Generated local code-navigation index.
+.codegraph/

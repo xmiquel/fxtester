@@ -1,0 +1,60 @@
+name: Backend quality gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install backend dependencies
+        run: pip install uv
+      - name: Run the complete backend test suite
+        run: uv run --directory backend --group dev pytest --cov=app --cov-fail-under=80
+      - name: Ruff
+        run: uv run --directory backend --group dev ruff check .
+      - name: Mypy
+        run: uv run --directory backend --group dev mypy app
+      - name: pip-audit
+        run: uv run --directory backend --group dev pip-audit
+      - name: Semgrep CE
+        run: uvx semgrep scan --config p/python --error backend
+      - name: Create a temporary read-only market database
+        run: |
+          export MARKET_DATABASE_PATH="$RUNNER_TEMP/market.duckdb"
+          uv run --directory backend python -c 'import duckdb, os; path = os.environ["MARKET_DATABASE_PATH"]; connection = duckdb.connect(path); connection.execute("CREATE TABLE dt_ohlc_m1 (datetime TIMESTAMP, symbol VARCHAR, \"OPEN\" DOUBLE, high DOUBLE, low DOUBLE, \"close\" DOUBLE, tickvol BIGINT, volume BIGINT, spread BIGINT, origen VARCHAR, fecha_carga TIMESTAMP)"); connection.close()'
+          chmod a-w "$MARKET_DATABASE_PATH"
+          test ! -w "$MARKET_DATABASE_PATH"
+          echo "MARKET_DATABASE_PATH=$MARKET_DATABASE_PATH" >> "$GITHUB_ENV"
+      - name: Verify Compose backend, frontend placeholder, and immutable source mount
+        run: |
+          IMAGE_VERSION="ci-${{ github.sha }}" BUILD_REVISION="${{ github.sha }}" docker compose --project-name "ci-${{ github.sha }}" build --build-arg "BUILD_REVISION=${{ github.sha }}" backend
+          docker compose --project-name "ci-${{ github.sha }}" build frontend
+          IMAGE_VERSION="ci-${{ github.sha }}" docker compose --project-name "ci-${{ github.sha }}" up --detach backend frontend
+          trap 'docker compose --project-name "ci-${{ github.sha }}" logs backend frontend; docker compose --project-name "ci-${{ github.sha }}" down --volumes' EXIT
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health && curl --fail --silent --show-error http://127.0.0.1:8000/ready; then
+              break
+            fi
+           sleep 2
+          done
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:5173/ | grep -Fq '<h1>Trading Terminal</h1>' && test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:8000/health | grep -Fx '{"status":"ok"}'
+          curl --fail --silent --show-error http://127.0.0.1:8000/ready | grep -Fx '{"status":"ready"}'
+          curl --fail --silent --show-error http://127.0.0.1:5173/ | grep -Fq '<h1>Trading Terminal</h1>'
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy
+          docker compose --project-name "ci-${{ github.sha }}" logs backend | grep -F '"event": "database_health"' | grep -F '"status": "ok"'
+          docker compose --project-name "ci-${{ github.sha }}" logs backend | grep -F '"event": "database_readiness"' | grep -F '"status": "ready"'
+          docker inspect --format '{{json .Mounts}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet backend)" | jq -e '.[] | select(.Destination == "/data/market.duckdb" and .RW == false)' > /dev/null
+          test ! -w "$MARKET_DATABASE_PATH"
