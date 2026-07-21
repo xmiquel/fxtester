@@ -2,12 +2,11 @@
 
 ## Technical Approach
 
-PR 1 delivers the backend, container, and CI foundation: NDX-only, `1m`, read-only, and bounded
-to 200 candles, plus only a minimal frontend startup placeholder. FastAPI is the contract and
-DuckDB is the query/aggregation boundary. The backend uses official `python:3.14-slim` with
-normal CPython and a glibc-compatible DuckDB wheel. The one-chart data flow, chart rendering, and
-navigation/pagination are target behavior for PR 2; PR 2 will add the TanStack Query client
-without changing the backend boundary.
+PR 1 delivered the backend, container, and CI foundation: NDX-only, `1m`, read-only, and bounded
+to 200 candles, plus only a minimal frontend startup placeholder. PR 2 is complete: FastAPI is
+the contract, DuckDB remains the query/aggregation boundary, and one chart uses TanStack Query
+cursor windows without changing that backend boundary. The backend uses official `python:3.14-slim`
+with normal CPython and a glibc-compatible DuckDB wheel.
 
 ## Architecture Decisions
 
@@ -50,11 +49,11 @@ Normal CPython 3.14 is required; the free-threaded build is out of scope. DHI, r
 
 ## Data Flow
 
-PR 1 startup placeholder → (PR 2) single chart view state derives market-window params →
+PR 1 startup placeholder → PR 2 single chart view state derives market-window params →
 `useInfiniteQuery` fetches/caches pages → identical windows dedupe across any future chart →
 backend validates request and returns ≤200 candles → DuckDB reads the source read-only and applies
-filtering/ordering/limit → (PR 2) chart renders the returned pages and requests more history on
-navigation.
+filtering/ordering/limit → the chart renders chronologically sorted, duplicate-free bounded pages
+and requests more history on navigation.
 
     Chart A local state     Chart B local state (future)
             │                         │
@@ -74,9 +73,10 @@ Deployment path: official Python image → compatible DuckDB wheel install/test 
 |---|---|---|
 | `openspec/changes/trading-terminal-foundation/design.md` | Modify | Clarify single-chart slice, shared window cache, bounded pagination, and backend-only aggregation |
 | `frontend/index.html` and startup placeholder files | Implemented in PR 1 | Minimal frontend startup surface only; no chart data flow or rendering |
-| `frontend/src/features/candles/queryKeys.ts` | Create in PR 2 | Market-window query key builder without chart-instance identity |
-| `frontend/src/features/candles/useCandleWindow.ts` | Create in PR 2 | `useInfiniteQuery` hook with `maxPages` and explicit cache lifetime |
-| `frontend/src/features/candles/CandlestickChart.tsx` | Modify in PR 2 | Keep visual state local; consume shared window data |
+| `frontend/src/features/candles/queryKeys.ts` | Implemented in PR 2 | Market-window query key builder without chart-instance identity |
+| `frontend/src/features/candles/useCandleWindow.ts` | Implemented in PR 2 | `useInfiniteQuery` hook with `maxPages` and explicit cache lifetime |
+| `frontend/src/features/candles/CandlestickChart.tsx` | Implemented in PR 2 | Keeps visual state local and renders chronological, duplicate-free shared window data |
+| `backend/app/export_openapi.py` / `backend/openapi.json` | PR 2 follow-up | Deterministically export the FastAPI contract before TypeScript type generation |
 | `backend/app/features/candles/window.py` | Modify | Preserve 200-response policy and keep future aggregation backend-only |
 | `docker/backend.Dockerfile` | Implemented in PR 1 | Uses `python:3.14-slim`, asserts CPython 3.14, and imports DuckDB |
 | `.github/workflows/ci.yml` | Implemented in PR 1 | Runs pytest with coverage, Ruff including `S` rules, mypy, pip-audit, Semgrep CE, and Compose readiness/mount/event checks; no Trivy, attestation, or registry credentials |
@@ -110,7 +110,7 @@ Query functions MUST forward `signal` to `fetch`. Page data MUST be treated as b
 
 PR 1 rollout builds the official image, runs all retained quality/security gates, starts Compose
 with the read-only source, verifies `/ready`, and confirms the frontend startup placeholder. PR 2
-adds the chart-flow and rendering checks. On failure, fix the image or dependencies and rerun the
+has added chart-flow, rendered-history, and OpenAPI-drift checks. On failure, fix the image or dependencies and rerun the
 gates. Roll back by redeploying the last known-good application commit/image; no database
 migration, registry access, attestation, digest update, Trivy scan, or CVE exception is required.
 Keep the eventual one-chart behavior, 200-candle policy, and backend-only future aggregation
@@ -118,5 +118,5 @@ unchanged.
 
 ## Open Questions
 
-None. PR 1 implementation is complete with the minimal frontend startup placeholder; the one-chart
-data flow, rendering, and pagination remain deferred to PR 2.
+None. PR 1 and PR 2 are complete; follow-up work is limited to reproducibility and verification
+evidence, without a new product capability.

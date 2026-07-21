@@ -26,7 +26,36 @@ SOURCE_COLUMNS = (
     "origen",
     "fecha_carga",
 )
-SOURCE_COLUMN_SQL = ", ".join(SOURCE_COLUMNS)
+# DuckDB normalizes unquoted result names. Select the source's quoted OPEN column
+# with its normalized result name, then map it deliberately to the public contract.
+SOURCE_COLUMN_SQL = ", ".join(
+    (
+        "datetime",
+        "symbol",
+        '"OPEN" AS open',
+        "high",
+        "low",
+        '"close" AS close',
+        "tickvol",
+        "volume",
+        "spread",
+        "origen",
+        "fecha_carga",
+    )
+)
+SOURCE_TO_CONTRACT_FIELDS = (
+    ("datetime", "datetime"),
+    ("symbol", "symbol"),
+    ("open", "OPEN"),
+    ("high", "high"),
+    ("low", "low"),
+    ("close", "close"),
+    ("tickvol", "tickvol"),
+    ("volume", "volume"),
+    ("spread", "spread"),
+    ("origen", "origen"),
+    ("fecha_carga", "fecha_carga"),
+)
 DATABASE_AVAILABILITY_QUERY = f"SELECT 1 FROM {SOURCE_TABLE} LIMIT 1"  # noqa: S608
 
 
@@ -85,7 +114,14 @@ class DuckDbCandleRepository:
 
         has_more = len(rows) > limit
         rows = rows[:limit]
-        candles = [dict(zip(columns, row, strict=True)) for row in reversed(rows)]
+        source_rows = [dict(zip(columns, row, strict=True)) for row in reversed(rows)]
+        candles = [
+            {
+                contract_field: source_row[source_field]
+                for source_field, contract_field in SOURCE_TO_CONTRACT_FIELDS
+            }
+            for source_row in source_rows
+        ]
         next_cursor = candles[0]["datetime"].isoformat() if has_more and candles else None
         return CandleWindow(candles=candles, next_cursor=next_cursor, has_more=has_more)
 

@@ -6,6 +6,27 @@ on:
     branches: [main]
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend --no-audit --no-fund
+      - name: Type-check and build frontend
+        run: npm run build --prefix frontend
+      - name: Lint frontend
+        run: npm run lint --prefix frontend
+      - name: Run frontend unit tests
+        run: npm test --prefix frontend
+      - name: Install Playwright browser
+        run: npm exec --prefix frontend playwright install --with-deps chromium
+      - name: Run frontend browser tests
+        run: npm run e2e --prefix frontend
   backend:
     runs-on: ubuntu-latest
     steps:
@@ -15,6 +36,17 @@ jobs:
           python-version: "3.14"
       - name: Install backend dependencies
         run: pip install uv
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies for contract generation
+        run: npm ci --prefix frontend --no-audit --no-fund
+      - name: Regenerate OpenAPI frontend types without drift
+        run: |
+          npm run generate:api --prefix frontend
+          git diff --exit-code -- backend/openapi.json frontend/src/api/generated.ts
       - name: Run the complete backend test suite
         run: uv run --directory backend --group dev pytest --cov=app --cov-fail-under=80
       - name: Ruff
@@ -24,15 +56,22 @@ jobs:
       - name: pip-audit
         run: uv run --directory backend --group dev pip-audit
       - name: Semgrep CE
-        run: uvx semgrep scan --config p/python --error backend
+        run: uvx --from semgrep==1.144.0 semgrep scan --config p/python --error --strict backend
+      - name: Verify frontend Docker build context exclusions
+        run: |
+          printf 'context sentinel' > frontend/.env.ci-context-check
+          mkdir -p frontend/test-results/context-check frontend/coverage
+          trap 'rm -rf frontend/.env.ci-context-check frontend/test-results/context-check frontend/coverage' EXIT
+          docker build --tag frontend-context-check --file docker/frontend.Dockerfile frontend
+          docker run --rm frontend-context-check sh -c 'test ! -e /app/.env.ci-context-check && test ! -d /app/test-results && test ! -d /app/coverage'
       - name: Create a temporary read-only market database
         run: |
           export MARKET_DATABASE_PATH="$RUNNER_TEMP/market.duckdb"
-          uv run --directory backend python -c 'import duckdb, os; path = os.environ["MARKET_DATABASE_PATH"]; connection = duckdb.connect(path); connection.execute("CREATE TABLE dt_ohlc_m1 (datetime TIMESTAMP, symbol VARCHAR, \"OPEN\" DOUBLE, high DOUBLE, low DOUBLE, \"close\" DOUBLE, tickvol BIGINT, volume BIGINT, spread BIGINT, origen VARCHAR, fecha_carga TIMESTAMP)"); connection.close()'
+          uv run --directory backend python -c 'import duckdb, os; from datetime import datetime; path = os.environ["MARKET_DATABASE_PATH"]; connection = duckdb.connect(path); connection.execute("CREATE TABLE dt_ohlc_m1 (datetime TIMESTAMP, symbol VARCHAR, \"OPEN\" DOUBLE, high DOUBLE, low DOUBLE, \"close\" DOUBLE, tickvol BIGINT, volume BIGINT, spread BIGINT, origen VARCHAR, fecha_carga TIMESTAMP)"); connection.execute("INSERT INTO dt_ohlc_m1 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [datetime(2025, 1, 1), "NDX", 100.0, 101.0, 99.0, 100.5, 1, 1, 1, "ci", datetime(2025, 1, 1)]); connection.close()'
           chmod a-w "$MARKET_DATABASE_PATH"
           test ! -w "$MARKET_DATABASE_PATH"
           echo "MARKET_DATABASE_PATH=$MARKET_DATABASE_PATH" >> "$GITHUB_ENV"
-      - name: Verify Compose backend, frontend placeholder, and immutable source mount
+      - name: Verify Compose backend, executed frontend chart, and immutable source mount
         run: |
           IMAGE_VERSION="ci-${{ github.sha }}" BUILD_REVISION="${{ github.sha }}" docker compose --project-name "ci-${{ github.sha }}" build --build-arg "BUILD_REVISION=${{ github.sha }}" backend
           docker compose --project-name "ci-${{ github.sha }}" build frontend
@@ -45,16 +84,24 @@ jobs:
            sleep 2
           done
           for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error http://127.0.0.1:5173/ | grep -Fq '<h1>Trading Terminal</h1>' && test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy; then
+            if curl --fail --silent --show-error http://127.0.0.1:5173/api/candles | jq -e '.symbol == "NDX" and (.candles | length == 1)' > /dev/null && test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy; then
               break
             fi
             sleep 2
           done
           curl --fail --silent --show-error http://127.0.0.1:8000/health | grep -Fx '{"status":"ok"}'
           curl --fail --silent --show-error http://127.0.0.1:8000/ready | grep -Fx '{"status":"ready"}'
-          curl --fail --silent --show-error http://127.0.0.1:5173/ | grep -Fq '<h1>Trading Terminal</h1>'
+          curl --fail --silent --show-error http://127.0.0.1:5173/api/candles | jq -e '.symbol == "NDX" and .timeframe == "1m" and (.candles | length == 1) and (.candles[0] | has("OPEN") and has("high") and has("low") and has("close"))' > /dev/null
           test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy
+          npm exec --prefix frontend playwright install --with-deps chromium
+          npm exec --prefix frontend playwright test -- --config frontend/playwright.compose.config.ts
           docker compose --project-name "ci-${{ github.sha }}" logs backend | grep -F '"event": "database_health"' | grep -F '"status": "ok"'
           docker compose --project-name "ci-${{ github.sha }}" logs backend | grep -F '"event": "database_readiness"' | grep -F '"status": "ready"'
           docker inspect --format '{{json .Mounts}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet backend)" | jq -e '.[] | select(.Destination == "/data/market.duckdb" and .RW == false)' > /dev/null
+          SOURCE_SHA_BEFORE="$(sha256sum "$MARKET_DATABASE_PATH" | awk '{print $1}')"
+          if docker compose --project-name "ci-${{ github.sha }}" exec -T backend python -c "from pathlib import Path; Path('/data/market.duckdb').write_bytes(b'unsafe')"; then
+            echo "read-only source write unexpectedly succeeded" >&2
+            exit 1
+          fi
+          test "$SOURCE_SHA_BEFORE" = "$(sha256sum "$MARKET_DATABASE_PATH" | awk '{print $1}')"
           test ! -w "$MARKET_DATABASE_PATH"

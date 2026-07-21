@@ -25,11 +25,13 @@ services:
       dockerfile: ../docker/frontend.Dockerfile
     ports:
       - "5173:5173"
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/ | grep -Fq '<h1>Trading Terminal</h1>'"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/ | grep -Fq '<div id=\"root\"></div>' && wget -qO- http://127.0.0.1:5173/api/candles | grep -Fq '\"candles\"'"]
       interval: 10s
       timeout: 5s
       retries: 3

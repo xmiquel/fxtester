@@ -3,18 +3,18 @@ project: fxtester
 strict_tdd: false
 context: |
   Project: fxtester
-  Workspace status: initial PR 1 implementation staged; PR 2 frontend chart work remains pending.
+  Workspace status: trading-terminal-foundation is completed and archived; all associated remediation is complete.
   Tech stack: Python 3.14 FastAPI + DuckDB backend, Node 22 Vite frontend scaffold, Docker Compose, and GitHub Actions.
-  Architecture: read-only DuckDB candle-window API with a health-gated Vite placeholder; chart/query UI stays in PR 2.
-  Testing: pytest with pytest-cov, Docker Compose runtime checks, Ruff security rules, mypy, pip-audit, and Semgrep CE are available.
-  Style: Python uses Ruff and strict mypy; frontend is a minimal Vite scaffold with no chart UI in PR 1.
+  Architecture: read-only DuckDB candle-window API with one bounded React 19 Lightweight Charts view; chart rendering, typed query client, and older-window navigation were delivered in PR 2.
+  Testing: pytest with pytest-cov, Vitest, Playwright, Docker Compose runtime checks, Ruff security rules, mypy, pip-audit, and pinned Semgrep CE are available.
+  Style: Python uses Ruff and strict mypy; frontend is a Vite React chart shell with strict TypeScript.
 testing:
   detected: 2026-07-19
   runner: pytest
   layers:
     unit: true
     integration: true
-    e2e: false
+    e2e: true
   coverage: true
   quality:
     linter: ruff

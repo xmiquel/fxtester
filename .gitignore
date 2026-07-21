@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 node_modules/
 dist/
+frontend/test-results/
 
 # Local runtime data and secrets; tracked example templates remain allowed.
 *.duckdb

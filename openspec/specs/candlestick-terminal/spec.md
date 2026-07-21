@@ -6,9 +6,8 @@ Define how the terminal renders and pages `1m` candlesticks from bounded backend
 
 ## Delivery Status
 
-PR 1 delivers the bounded backend candle-window API only. Chart rendering and browser-driven
-history paging are explicitly pending PR 2. The requirements below remain the eventual terminal
-behavior that PR 2 MUST implement; this delivery split does not relax them.
+PR 1 delivered the bounded backend candle-window API. PR 2 delivered chart rendering and
+browser-driven history paging; the requirements below describe the delivered terminal behavior.
 
 ## Requirements
 

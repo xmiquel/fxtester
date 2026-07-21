@@ -1,6 +1,11 @@
 ## Exploration: Trading terminal foundation
 
-### Current State
+### Historical planning snapshot
+- This archived exploration records the state before PR 2 delivery. Subsequent PR 2 remediation
+  delivered the chart, retry recovery, telemetry, and verification evidence; this historical file
+  is not itself delivery evidence.
+
+### Current State at exploration time
 - PR 1 is implemented: the repository contains a FastAPI/DuckDB backend, isolated pytest suite,
   Docker Compose topology, backend CI gates, and operations documentation.
 - The backend reads the host `market.duckdb` as `/data/market.duckdb` through an immutable bind
@@ -60,7 +65,7 @@ Decision matrix:
 - DuckDB mount readability and immutable permissions must be verified before deployment.
 - Lightweight Charts needs careful resize and cleanup handling to avoid rendering leaks.
 
-### Resulting State
+### Resulting State at exploration time
 The monorepo, backend-as-system-of-record, and read-only DuckDB decisions were accepted and
 implemented for PR 1. The remaining frontend query/chart decisions belong to PR 2 and do not
 change the completed backend boundary.

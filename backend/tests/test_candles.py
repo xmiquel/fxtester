@@ -53,6 +53,17 @@ def test_candles_are_bounded_and_preserve_source_columns(tmp_path) -> None:
     assert body["has_more"] is True
 
 
+def test_candles_map_duckdb_open_to_the_public_open_contract(tmp_path) -> None:
+    database = tmp_path / "market.duckdb"
+    make_database(str(database), count=1)
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.get("/candles")
+
+    assert response.status_code == 200
+    assert response.json()["candles"][0]["OPEN"] == 1.0
+
+
 def test_unsupported_symbol_is_rejected(tmp_path) -> None:
     database = tmp_path / "market.duckdb"
     make_database(str(database), count=1)
@@ -61,6 +72,19 @@ def test_unsupported_symbol_is_rejected(tmp_path) -> None:
     response = client.get("/candles", params={"symbol": "SPX"})
 
     assert response.status_code == 400
+
+
+def test_openapi_documents_invalid_candle_parameters(tmp_path) -> None:
+    database = tmp_path / "market.duckdb"
+    make_database(str(database), count=1)
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    assert response.json()["paths"]["/candles"]["get"]["responses"]["400"] == {
+        "description": "The requested symbol or timeframe is not supported by this candle slice."
+    }
 
 
 def test_only_one_minute_timeframe_is_exposed(tmp_path) -> None:
@@ -170,6 +194,39 @@ def test_health_and_ready_emit_success_events_when_database_is_available(tmp_pat
     assert ready_response.json() == {"status": "ready"}
     assert any('"event": "database_health"' in record.message for record in caplog.records)
     assert any('"event": "database_readiness"' in record.message for record in caplog.records)
+
+
+def test_client_observability_events_are_structured_and_bounded(tmp_path, caplog) -> None:
+    caplog.set_level("INFO", logger="app.database")
+    database = tmp_path / "market.duckdb"
+    make_database(str(database), count=1)
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.post(
+        "/client-events",
+        json={
+            "kind": "api_failure",
+            "message": "Unable to load candles (503)",
+            "path": "/",
+        },
+    )
+
+    assert response.status_code == 202
+    assert any(
+        '"event": "client_observability"' in record.message
+        and '"kind": "api_failure"' in record.message
+        for record in caplog.records
+    )
+    assert client.post(
+        "/client-events",
+        json={"kind": "unknown", "message": "x", "path": "/"},
+    ).status_code == 422
+    client.get("/candles")
+    assert any(
+        '"duration_ms":' in record.message
+        and '"event": "candle_request"' in record.message
+        for record in caplog.records
+    )
 
 
 def test_health_and_ready_emit_unavailable_events_when_database_is_missing(

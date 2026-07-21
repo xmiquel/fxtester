@@ -1,6 +1,6 @@
 # Trading Terminal Foundation
 
-This workspace contains PR 1 of the trading terminal: a bounded, read-only backend foundation.
+This workspace contains the bounded, read-only trading terminal foundation and its single-chart UI.
 
 ## Quick path
 
@@ -8,7 +8,8 @@ This workspace contains PR 1 of the trading terminal: a bounded, read-only backe
 2. Set `IMAGE_VERSION` and `BUILD_REVISION` to the published Git commit identifier, then run
    `docker compose up --build`.
 3. Verify `curl http://localhost:8000/ready` returns `{"status":"ready"}`.
-4. Open `http://localhost:8000/docs` and request `GET /candles?symbol=NDX&timeframe=1m`.
+4. Open `http://localhost:5173` to view the NDX `1m` candlestick chart. Use **Load older candles**
+   only when you want the next bounded history window.
 
 If Compose reports that `/data/market.duckdb` cannot be mounted, check the host path in
 `docker-compose.yml`, confirm the file exists, and retry after correcting the path. A 503 from
@@ -36,10 +37,15 @@ inspect the backend logs before changing the mount.
   After publication, stop Compose and redeploy the last known-good Git commit/image identifier;
   no schema migration or source-data write is required.
 
-Frontend charting, generated client types, and frontend-specific checks are intentionally deferred
-to PR 2. PR 1 delivers the paginated backend contract only: it does not render a chart or trigger
-older-window requests from browser navigation. PR 2 will implement that chart rendering and
-navigation-driven paging behavior. The current frontend image is only a Vite startup scaffold so
-the documented Compose path does not fail on a missing dependency.
+## Frontend boundary
 
-Run backend checks from `backend/` with `uv run pytest --cov=app`, `uv run ruff check .`, `uv run mypy app`, and `uv run pip-audit`.
+- The terminal renders one NDX `1m` candlestick chart. It has no symbol selector, timeframe
+  selector, orders, authentication, or aggregation UI.
+- The generated TypeScript candle contract is in `frontend/src/api/generated.ts`. Regenerate it
+  after exporting `backend/openapi.json` with `npm run generate:api --prefix frontend`.
+- TanStack Query caches cursor windows by symbol, timeframe, cursor, and limit. It retains at most
+  three pages, so older history is requested only after **Load older candles** is selected.
+- Future concurrent charts can share identical market windows, but this slice intentionally shows
+  only one chart.
+
+Run backend checks from `backend/` with `uv run pytest --cov=app`, `uv run ruff check .`, `uv run mypy app`, and `uv run pip-audit`. Run frontend checks with `npm run build --prefix frontend`, `npm run lint --prefix frontend`, `npm test --prefix frontend`, and `npm run e2e --prefix frontend`.

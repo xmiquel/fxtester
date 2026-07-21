@@ -61,8 +61,10 @@ Revert this proposal and related container/security planning changes. No applica
 
 - [x] **PR 1:** Backend returns bounded NDX `1m` windows from read-only DuckDB, including
   deterministic terminal-page and empty-table responses.
-- [ ] **PR 2:** Frontend requests more history only when navigation requires it.
-- [ ] **PR 2:** Generated TypeScript types align with FastAPI OpenAPI.
+- [x] **PR 2:** Frontend requests more history only when navigation requires it, with
+  chronological, duplicate-free bounded chart history across cursor windows.
+- [x] **PR 2:** Generated TypeScript types align with FastAPI OpenAPI through the checked-in
+  contract export and CI drift check.
 - [x] **PR 1:** CI enforces retained backend controls and contains no DHI, Trivy, attestation,
   registry/digest, or temporary-CVE requirements.
 
@@ -70,4 +72,7 @@ Revert this proposal and related container/security planning changes. No applica
 
 PR 1 is complete: its FastAPI/DuckDB boundary, official `python:3.14-slim` image, read-only
 Compose mount, health/readiness events, backend quality gates, and operations guidance are in
-place. PR 2 frontend/chart work remains intentionally unimplemented.
+place. PR 2 is complete: it delivers one NDX `1m` chart, cursor-driven older-window navigation,
+bounded client retention, generated OpenAPI types, and browser evidence for chronological,
+duplicate-free history. The follow-up closes reproducibility and operational evidence only; it
+does not reopen PR 1 or add product scope.

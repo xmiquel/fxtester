@@ -1,9 +1,14 @@
 import json
 import logging
 import sys
+from collections.abc import Awaitable, Callable
+from datetime import datetime as DateTime
+from time import perf_counter
+from typing import Literal
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from app.features.candles.window import (
     CANDLE_WINDOW_LIMIT,
@@ -24,6 +29,34 @@ if not logger.handlers:
     logger.addHandler(handler)
 
 
+class Candle(BaseModel):
+    datetime: DateTime
+    symbol: str
+    OPEN: float
+    high: float
+    low: float
+    close: float
+    tickvol: int
+    volume: int
+    spread: int
+    origen: str
+    fecha_carga: DateTime
+
+
+class CandleWindow(BaseModel):
+    symbol: str
+    timeframe: str
+    candles: list[Candle]
+    next_cursor: str | None
+    has_more: bool
+
+
+class ClientEvent(BaseModel):
+    kind: Literal["api_failure", "unhandled_error", "unhandled_rejection"]
+    message: str = Field(max_length=1000)
+    path: str = Field(max_length=500)
+
+
 def log_database_event(event: str, **fields: str) -> None:
     logger.info(json.dumps({"event": event, **fields}, sort_keys=True))
 
@@ -31,6 +64,25 @@ def log_database_event(event: str, **fields: str) -> None:
 def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     app = FastAPI(title="Trading Terminal API", version="0.1.0")
     candle_service = CandleWindowService(repository or DuckDbCandleRepository())
+
+    @app.middleware("http")
+    async def log_candle_request(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        started_at = perf_counter()
+        response = await call_next(request)
+        if request.url.path == "/candles":
+            logger.info(
+                json.dumps(
+                    {
+                        "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+                        "event": "candle_request",
+                        "status_code": response.status_code,
+                    },
+                    sort_keys=True,
+                )
+            )
+        return response
 
     @app.exception_handler(DatabaseUnavailable)
     async def database_unavailable(
@@ -73,7 +125,32 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
         log_database_event("database_readiness", status="ready")
         return {"status": "ready"}
 
-    @app.get("/candles", tags=["candles"])
+    @app.post("/client-events", status_code=202, tags=["observability"])
+    def client_event(event: ClientEvent) -> None:
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "client_observability",
+                    "kind": event.kind,
+                    "message": event.message,
+                    "path": event.path,
+                },
+                sort_keys=True,
+            )
+        )
+
+    @app.get(
+        "/candles",
+        response_model=CandleWindow,
+        responses={
+            400: {
+                "description": (
+                    "The requested symbol or timeframe is not supported by this candle slice."
+                )
+            }
+        },
+        tags=["candles"],
+    )
     def candles(
         symbol: str = SUPPORTED_SYMBOL,
         timeframe: str = SUPPORTED_TIMEFRAME,
