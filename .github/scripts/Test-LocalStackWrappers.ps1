@@ -43,9 +43,9 @@ function New-FakeDockerExecutable {
         [string]$Directory
     )
 
-    $isWindows = $env:OS -eq 'Windows_NT'
-    $fakeDocker = Join-Path $Directory $(if ($isWindows) { 'docker.cmd' } else { 'docker' })
-    if ($isWindows) {
+    $useWindowsCommandScript = $env:OS -eq 'Windows_NT'
+    $fakeDocker = Join-Path $Directory $(if ($useWindowsCommandScript) { 'docker.cmd' } else { 'docker' })
+    if ($useWindowsCommandScript) {
         @'
 @echo off
 echo %*>> "%FAKE_DOCKER_LOG%"
