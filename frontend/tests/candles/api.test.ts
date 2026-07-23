@@ -5,7 +5,7 @@ vi.mock("../../src/observability", () => ({
   reportClientEvent: vi.fn(),
 }));
 
-import { fetchCandleWindow } from "../../src/features/candles/api";
+import { fetchCandleWindow, fetchSymbols } from "../../src/features/candles/api";
 import { CLIENT_EVENT_KIND, reportClientEvent } from "../../src/observability";
 
 test("forwards the query AbortSignal to fetch", async () => {
@@ -20,6 +20,33 @@ test("forwards the query AbortSignal to fetch", async () => {
   await fetchCandleWindow({ symbol: "NDX", timeframe: "1m", cursor: null, limit: 200, signal: controller.signal });
 
   expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/candles?"), { signal: controller.signal });
+  fetchMock.mockRestore();
+});
+
+test("returns the symbol catalog and forwards the query AbortSignal", async () => {
+  const controller = new AbortController();
+  const catalog = { symbols: ["NDX", "SPX"] };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(catalog), { status: 200 }),
+  );
+
+  await expect(fetchSymbols({ signal: controller.signal })).resolves.toEqual(catalog);
+
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/symbols"), { signal: controller.signal });
+  fetchMock.mockRestore();
+});
+
+test("reports and rejects an unavailable symbol catalog", async () => {
+  const controller = new AbortController();
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 503 }));
+
+  await expect(fetchSymbols({ signal: controller.signal })).rejects.toThrow(
+    "Unable to load market symbols (503)",
+  );
+  expect(reportClientEvent).toHaveBeenCalledWith(
+    CLIENT_EVENT_KIND.API_FAILURE,
+    expect.objectContaining({ message: "Unable to load market symbols (503)" }),
+  );
   fetchMock.mockRestore();
 });
 

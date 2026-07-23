@@ -13,10 +13,37 @@
    ```
 
 3. Confirm `curl http://localhost:8000/ready` returns HTTP 200 and `{"status":"ready"}`.
-   Confirm `curl http://localhost:5173/api/candles` returns HTTP 200 with `OPEN`, `high`, `low`,
-   and `close` through the frontend proxy. Run the Compose browser check below to prove React
-   executes and renders that API response. Inspect backend logs for `database_health` and
-   `database_readiness`, and inspect the container mount for `/data/market.duckdb` with `RW=false`.
+   Then fetch `curl http://localhost:8000/symbols`. `{"symbols":[]}` is healthy: do not probe
+   candles when no symbol is available. Select a returned symbol in the browser, or use it in
+   `curl "http://localhost:5173/api/candles?symbol=<symbol>"`.
+   Confirm HTTP 200 with `OPEN`, `high`, `low`, and `close` through the frontend proxy. Run the
+   Compose browser check below to prove React executes and renders that API response. Inspect
+   backend logs for
+   `database_health`, `database_readiness`, and `symbol_catalog_request`, and inspect the container
+   mount for `/data/market.duckdb` with `RW=false`.
+
+## Local stack wrappers
+
+From the repository root, use the root PowerShell wrappers to start or stop the Compose stack:
+
+```powershell
+.\Start-LocalStack.ps1
+.\Start-LocalStack.ps1 -WaitTimeoutSeconds 120
+.\Stop-LocalStack.ps1
+```
+
+From another working directory, invoke the wrappers by their repository path:
+
+```powershell
+& "D:\repos\fxtester\Start-LocalStack.ps1"
+& "D:\repos\fxtester\Stop-LocalStack.ps1"
+```
+
+Start waits up to 90 seconds by default for every Compose-defined service to reach its configured
+running or healthy state. Use a custom timeout from 1 through 600 seconds when needed. Success means
+the stack reached that state and the wrapper reports its Compose status. If startup fails, follow the
+[recovery guidance](#recovery). Stop preserves Docker volumes and the host DuckDB file; it removes
+containers and the network only.
 
 ## Failure diagnosis
 
@@ -24,6 +51,9 @@
 |---|---|---|
 | Compose cannot mount `/data/market.duckdb` | The host path and file permissions | Correct the bind source, then recreate the stack |
 | `/health` or `/ready` returns 503 | Backend logs and DuckDB readability | Restore the file or mount a readable copy; do not make it writable |
+| `/symbols` returns 503 | `symbol_catalog_request` and database-unavailable logs | Restore the readable source, verify `/ready`, then retry catalog discovery |
+| `/symbols` returns `{"symbols":[]}` | Confirm the source table has usable non-blank symbols | This is a valid empty catalog, not a database outage; do not fabricate a fallback symbol |
+| `/candles` returns 400 | Request includes a valid `symbol` from `/symbols` and `timeframe=1m` | Supply a discovered symbol. Only an omitted symbol resolves to freshly discovered `NDX`; explicit `symbol=`, unsupported symbols, and non-`1m` timeframes are rejected |
 | `/candles` returns 503 | Same database availability check | Fix the source and verify readiness before retrying |
 
 The API writes structured JSON events through Uvicorn's container logger. `/health` emits
@@ -33,15 +63,17 @@ The typed response is `type=service_unavailable`; it does not expose arbitrary d
 The narrowly scoped `POST /client-events` endpoint records browser `api_failure`,
 `unhandled_error`, and `unhandled_rejection` events as `client_observability` JSON log records.
 It is self-hosted: no browser event is sent to an external service.
-Every `/candles` response also emits a `candle_request` JSON record with `status_code` and
-`duration_ms`, so latency is measurable from the same backend stdout.
+Every `/candles` response emits a `candle_request` JSON record, and every `/symbols` response emits
+`symbol_catalog_request`; both include `status_code` and `duration_ms`, so latency is measurable
+from the same backend stdout.
 
 ## Observability baseline
 
 This first slice intentionally uses self-hosted structured application logs and runtime checks only.
 It does not provide Prometheus, Alertmanager, a `/metrics` endpoint, alert rules, or alert routing.
 
-- Probe `/health` for liveness and `/ready` for database-backed deployment readiness.
+- Probe `/health` for liveness and `/ready` for database-backed deployment readiness. Readiness
+  verifies source availability, not that the catalog contains at least one valid symbol.
 - Keep readiness success evidence with each deployment: the HTTP response and the backend log event.
 - Investigate `database_unavailable`, client-observability events, and unexpected candle-request
   latency from backend stdout before restarting or changing configuration.
@@ -100,11 +132,13 @@ git diff --exit-code -- backend/openapi.json frontend/src/api/generated.ts
 Historical verification could not execute Semgrep because the executable was unavailable; that is
 historical context, not the current release result. The separately reviewable final command and
 result are recorded in [final remediation evidence](final-remediation-evidence.md). `docker compose
-up --build` verifies backend health/readiness, the frontend HTTP surface, proxied candle fields,
-JSON health/readiness events, and `RW=false` for the DuckDB bind mount. CI additionally runs a
+up --build` verifies backend health/readiness, the frontend HTTP surface, valid empty-catalog
+handling, an available symbol's proxied candle fields, JSON health/readiness/catalog events, and
+`RW=false` for the DuckDB bind mount. CI additionally runs a
 browser check against the Compose containers to prove React renders the chart from the proxied API,
 then performs a rejected backend-container write attempt and verifies the temporary source SHA-256
-is unchanged.
+is unchanged. CI also recreates the Compose backend against an unreadable catalog source and asserts
+the typed `GET /symbols` 503 envelope before recovery.
 
 The frontend Docker context excludes dotenv files, local dependencies, coverage, browser results,
 and other local artifacts through `frontend/.dockerignore`. CI creates excluded sentinels, builds
@@ -113,7 +147,8 @@ the frontend image, and asserts those sentinels are absent from the resulting im
 ## Recovery
 
 - **Fix forward:** correct the host mount path or restore a readable source file, then run
-  `docker compose up --build` and verify `/ready`.
+  `docker compose up --build`, verify `/ready`, and fetch `/symbols`. Request `/candles` only when
+  a symbol is available; an empty catalog requires source-content investigation, not mount recovery.
 - **Initial release limitation:** before the first image is published, no earlier application image
   exists to redeploy. Fix forward, rerun every gate, and publish a versioned image only after
   readiness succeeds.
@@ -123,10 +158,13 @@ the frontend image, and asserts those sentinels are absent from the resulting im
 
 ## Frontend chart checks
 
-The frontend renders one NDX `1m` chart from the same read-only `/candles` API. It requests an
-older cursor window only when the operator selects **Load older candles**; TanStack Query retains
-at most three bounded pages and does not materialize full history. Future timeframe aggregation
-remains in DuckDB, not the browser.
+The frontend first fetches `/symbols`, selects the deterministic first symbol, and exposes the
+catalog in an accessible selector. A valid empty catalog shows an accessible no-symbols state, and
+catalog failure shows an accessible retryable error; neither state requests candles. Changing the
+selection uses an isolated symbol-keyed cursor cache. Once the chart is active, it requests an older
+cursor window only when the operator selects **Load older candles**; TanStack Query retains at most
+three bounded pages and does not materialize full history. Future timeframe aggregation remains in
+DuckDB, not the browser.
 
 Run the matching frontend gates before release:
 

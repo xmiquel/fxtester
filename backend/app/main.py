@@ -12,11 +12,12 @@ from pydantic import BaseModel, Field
 
 from app.features.candles.window import (
     CANDLE_WINDOW_LIMIT,
-    SUPPORTED_SYMBOL,
     SUPPORTED_TIMEFRAME,
     CandleWindowService,
     DatabaseUnavailable,
     DuckDbCandleRepository,
+    UnsupportedSymbolError,
+    UnsupportedTimeframeError,
 )
 
 # Application loggers do not inherit a handler from Uvicorn's default configuration.
@@ -51,6 +52,30 @@ class CandleWindow(BaseModel):
     has_more: bool
 
 
+class SymbolCatalog(BaseModel):
+    symbols: list[str]
+
+
+class UnsupportedSymbol(BaseModel):
+    type: Literal["unsupported_symbol"]
+    title: str
+    detail: str
+    symbol: str | None
+
+
+class UnsupportedTimeframe(BaseModel):
+    type: Literal["unsupported_timeframe"]
+    title: str
+    detail: str
+    timeframe: str
+
+
+class ServiceUnavailable(BaseModel):
+    type: Literal["service_unavailable"]
+    title: str
+    detail: str
+
+
 class ClientEvent(BaseModel):
     kind: Literal["api_failure", "unhandled_error", "unhandled_rejection"]
     message: str = Field(max_length=1000)
@@ -66,17 +91,19 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     candle_service = CandleWindowService(repository or DuckDbCandleRepository())
 
     @app.middleware("http")
-    async def log_candle_request(
+    async def log_market_request(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         started_at = perf_counter()
         response = await call_next(request)
-        if request.url.path == "/candles":
+        if request.url.path in {"/candles", "/symbols"}:
             logger.info(
                 json.dumps(
                     {
                         "duration_ms": round((perf_counter() - started_at) * 1000, 2),
-                        "event": "candle_request",
+                        "event": "symbol_catalog_request"
+                        if request.url.path == "/symbols"
+                        else "candle_request",
                         "status_code": response.status_code,
                     },
                     sort_keys=True,
@@ -104,12 +131,45 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
             ),
             exc_info=(type(error), error, error.__traceback__),
         )
+        title = (
+            "Market symbol catalog unavailable"
+            if request.url.path == "/symbols"
+            else "Market data service unavailable"
+        )
         return JSONResponse(
             status_code=503,
             content={
                 "type": "service_unavailable",
-                "title": "Market data service unavailable",
+                "title": title,
                 "detail": str(error),
+            },
+        )
+
+    @app.exception_handler(UnsupportedSymbolError)
+    async def unsupported_symbol(
+        request: Request, error: UnsupportedSymbolError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "type": "unsupported_symbol",
+                "title": "Unsupported market symbol",
+                "detail": str(error),
+                "symbol": error.symbol,
+            },
+        )
+
+    @app.exception_handler(UnsupportedTimeframeError)
+    async def unsupported_timeframe(
+        request: Request, error: UnsupportedTimeframeError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "type": "unsupported_timeframe",
+                "title": "Unsupported candle timeframe",
+                "detail": str(error),
+                "timeframe": error.timeframe,
             },
         )
 
@@ -140,19 +200,38 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
         )
 
     @app.get(
-        "/candles",
-        response_model=CandleWindow,
+        "/symbols",
+        response_model=SymbolCatalog,
         responses={
-            400: {
-                "description": (
-                    "The requested symbol or timeframe is not supported by this candle slice."
-                )
+            503: {
+                "model": ServiceUnavailable,
+                "description": "The market symbol catalog cannot be read from the source.",
             }
         },
         tags=["candles"],
     )
+    def symbols() -> dict[str, list[str]]:
+        return {"symbols": candle_service.list_symbols()}
+
+    @app.get(
+        "/candles",
+        response_model=CandleWindow,
+        responses={
+            400: {
+                "model": UnsupportedSymbol | UnsupportedTimeframe,
+                "description": (
+                    "The requested symbol or timeframe is not supported by this candle slice."
+                ),
+            },
+            503: {
+                "model": ServiceUnavailable,
+                "description": "The market source cannot be read.",
+            },
+        },
+        tags=["candles"],
+    )
     def candles(
-        symbol: str = SUPPORTED_SYMBOL,
+        symbol: str | None = None,
         timeframe: str = SUPPORTED_TIMEFRAME,
         cursor: str | None = None,
         limit: int = CANDLE_WINDOW_LIMIT,

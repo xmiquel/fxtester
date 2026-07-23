@@ -11,12 +11,13 @@ const WINDOW_LIMIT = 200;
 const CACHE_TIME_MS = 5 * 60 * 1000;
 
 interface CandleWindowParams {
+  enabled?: boolean;
   symbol: string;
   timeframe: "1m";
   limit?: number;
 }
 
-export function useCandleWindow({ symbol, timeframe, limit = WINDOW_LIMIT }: CandleWindowParams) {
+export function useCandleWindow({ enabled = true, symbol, timeframe, limit = WINDOW_LIMIT }: CandleWindowParams) {
   return useInfiniteQuery<
     CandleWindow,
     Error,
@@ -31,6 +32,7 @@ export function useCandleWindow({ symbol, timeframe, limit = WINDOW_LIMIT }: Can
     getNextPageParam: (lastPage) => (lastPage.has_more ? lastPage.next_cursor : undefined),
     maxPages: MAX_WINDOW_PAGES,
     retry: 0,
+    enabled,
     staleTime: CACHE_TIME_MS,
     gcTime: CACHE_TIME_MS,
   });

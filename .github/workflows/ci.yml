@@ -31,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify LocalStack PowerShell wrapper contract
+        shell: pwsh
+        run: ./.github/scripts/Test-LocalStackWrappers.ps1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -71,7 +74,7 @@ jobs:
           chmod a-w "$MARKET_DATABASE_PATH"
           test ! -w "$MARKET_DATABASE_PATH"
           echo "MARKET_DATABASE_PATH=$MARKET_DATABASE_PATH" >> "$GITHUB_ENV"
-      - name: Verify Compose backend, executed frontend chart, and immutable source mount
+      - name: Verify Compose backend, browser-facing frontend, and immutable source mount
         run: |
           IMAGE_VERSION="ci-${{ github.sha }}" BUILD_REVISION="${{ github.sha }}" docker compose --project-name "ci-${{ github.sha }}" build --build-arg "BUILD_REVISION=${{ github.sha }}" backend
           docker compose --project-name "ci-${{ github.sha }}" build frontend
@@ -83,25 +86,70 @@ jobs:
             fi
            sleep 2
           done
-          for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error http://127.0.0.1:5173/api/candles | jq -e '.symbol == "NDX" and (.candles | length == 1)' > /dev/null && test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy; then
+           for _ in $(seq 1 30); do
+              if curl --fail --silent --show-error http://127.0.0.1:8000/symbols | jq -e '.symbols | index("NDX") != null' > /dev/null && curl --fail --silent --show-error http://127.0.0.1:5173/ | grep -Fq '<div id="root"></div>' && curl --fail --silent --show-error "http://127.0.0.1:5173/api/candles?symbol=NDX" | jq -e '.symbol == "NDX" and (.candles | length == 1)' > /dev/null && test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy; then
               break
             fi
             sleep 2
           done
           curl --fail --silent --show-error http://127.0.0.1:8000/health | grep -Fx '{"status":"ok"}'
           curl --fail --silent --show-error http://127.0.0.1:8000/ready | grep -Fx '{"status":"ready"}'
-          curl --fail --silent --show-error http://127.0.0.1:5173/api/candles | jq -e '.symbol == "NDX" and .timeframe == "1m" and (.candles | length == 1) and (.candles[0] | has("OPEN") and has("high") and has("low") and has("close"))' > /dev/null
+           curl --fail --silent --show-error http://127.0.0.1:8000/symbols | jq -e '.symbols | index("NDX") != null' > /dev/null
+            curl --fail --silent --show-error http://127.0.0.1:5173/ | grep -Fq '<div id="root"></div>'
+            curl --fail --silent --show-error "http://127.0.0.1:5173/api/candles?symbol=NDX" | jq -e '.symbol == "NDX" and .timeframe == "1m" and (.candles | length == 1) and (.candles[0] | has("OPEN") and has("high") and has("low") and has("close"))' > /dev/null
+           curl --silent --show-error "http://127.0.0.1:8000/candles?symbol=UNKNOWN" | jq -e '.type == "unsupported_symbol" and .symbol == "UNKNOWN"' > /dev/null
           test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy
           npm exec --prefix frontend playwright install --with-deps chromium
           npm exec --prefix frontend playwright test -- --config frontend/playwright.compose.config.ts
           docker compose --project-name "ci-${{ github.sha }}" logs backend | grep -F '"event": "database_health"' | grep -F '"status": "ok"'
           docker compose --project-name "ci-${{ github.sha }}" logs backend | grep -F '"event": "database_readiness"' | grep -F '"status": "ready"'
+          docker compose --project-name "ci-${{ github.sha }}" logs backend | grep -F '"event": "symbol_catalog_request"' | grep -F '"status_code": 200'
           docker inspect --format '{{json .Mounts}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet backend)" | jq -e '.[] | select(.Destination == "/data/market.duckdb" and .RW == false)' > /dev/null
           SOURCE_SHA_BEFORE="$(sha256sum "$MARKET_DATABASE_PATH" | awk '{print $1}')"
           if docker compose --project-name "ci-${{ github.sha }}" exec -T backend python -c "from pathlib import Path; Path('/data/market.duckdb').write_bytes(b'unsafe')"; then
             echo "read-only source write unexpectedly succeeded" >&2
             exit 1
           fi
-          test "$SOURCE_SHA_BEFORE" = "$(sha256sum "$MARKET_DATABASE_PATH" | awk '{print $1}')"
-          test ! -w "$MARKET_DATABASE_PATH"
+           test "$SOURCE_SHA_BEFORE" = "$(sha256sum "$MARKET_DATABASE_PATH" | awk '{print $1}')"
+           test ! -w "$MARKET_DATABASE_PATH"
+           ORIGINAL_MARKET_DATABASE_PATH="$MARKET_DATABASE_PATH"
+           EMPTY_MARKET_DATABASE_PATH="$RUNNER_TEMP/empty-market.duckdb"
+           export EMPTY_MARKET_DATABASE_PATH
+           uv run --directory backend python -c 'import duckdb, os; path = os.environ["EMPTY_MARKET_DATABASE_PATH"]; connection = duckdb.connect(path); connection.execute("CREATE TABLE dt_ohlc_m1 (datetime TIMESTAMP, symbol VARCHAR, \"OPEN\" DOUBLE, high DOUBLE, low DOUBLE, \"close\" DOUBLE, tickvol BIGINT, volume BIGINT, spread BIGINT, origen VARCHAR, fecha_carga TIMESTAMP)"); connection.close()'
+           chmod a-w "$EMPTY_MARKET_DATABASE_PATH"
+           export MARKET_DATABASE_PATH="$EMPTY_MARKET_DATABASE_PATH"
+           docker compose --project-name "ci-${{ github.sha }}" up --detach --force-recreate backend frontend
+           for _ in $(seq 1 30); do
+             if curl --fail --silent --show-error http://127.0.0.1:8000/health && curl --fail --silent --show-error http://127.0.0.1:8000/ready && curl --fail --silent --show-error http://127.0.0.1:8000/symbols | jq -e '.symbols == []' > /dev/null && test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy; then
+               break
+             fi
+             sleep 2
+           done
+            curl --fail --silent --show-error http://127.0.0.1:8000/symbols | jq -e '.symbols == []' > /dev/null
+            test "$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose --project-name "ci-${{ github.sha }}" ps --quiet frontend)")" = healthy
+            UNAVAILABLE_MARKET_DATABASE_PATH="$RUNNER_TEMP/unavailable-market.duckdb"
+            printf 'not a DuckDB database' > "$UNAVAILABLE_MARKET_DATABASE_PATH"
+            chmod a-w "$UNAVAILABLE_MARKET_DATABASE_PATH"
+            export MARKET_DATABASE_PATH="$UNAVAILABLE_MARKET_DATABASE_PATH"
+            docker compose --project-name "ci-${{ github.sha }}" up --detach --force-recreate backend
+            for _ in $(seq 1 30); do
+              STATUS_CODE="$(curl --silent --show-error --output "$RUNNER_TEMP/unavailable-symbols.json" --write-out '%{http_code}' http://127.0.0.1:8000/symbols)"
+              if test "$STATUS_CODE" = 503 && jq -e '.type == "service_unavailable" and .title == "Market symbol catalog unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-symbols.json" > /dev/null; then
+                break
+              fi
+              sleep 2
+            done
+             test "$STATUS_CODE" = 503
+             jq -e '.type == "service_unavailable" and .title == "Market symbol catalog unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-symbols.json" > /dev/null
+             CANDLE_STATUS_CODE="$(curl --silent --show-error --output "$RUNNER_TEMP/unavailable-candles.json" --write-out '%{http_code}' http://127.0.0.1:8000/candles)"
+             test "$CANDLE_STATUS_CODE" = 503
+             jq -e '.type == "service_unavailable" and .title == "Market data service unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-candles.json" > /dev/null
+             export MARKET_DATABASE_PATH="$ORIGINAL_MARKET_DATABASE_PATH"
+           docker compose --project-name "ci-${{ github.sha }}" up --detach --force-recreate backend frontend
+           for _ in $(seq 1 30); do
+             if curl --fail --silent --show-error http://127.0.0.1:8000/ready && curl --fail --silent --show-error http://127.0.0.1:8000/candles | jq -e '.symbol == "NDX"' > /dev/null; then
+               break
+             fi
+             sleep 2
+           done
+           curl --fail --silent --show-error http://127.0.0.1:8000/candles | jq -e '.symbol == "NDX"' > /dev/null

@@ -41,7 +41,7 @@ test("renders an empty state when the bounded window contains no candles", async
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <CandlestickChart />
+      <CandlestickChart symbol="NDX" />
     </QueryClientProvider>,
   );
 
@@ -78,7 +78,7 @@ test("renders chronological, duplicate-free candles from adjacent cursor windows
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <CandlestickChart />
+      <CandlestickChart symbol="NDX" />
     </QueryClientProvider>,
   );
 
@@ -120,7 +120,7 @@ test("the production candle hook evicts the oldest window after three older page
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <CandlestickChart />
+      <CandlestickChart symbol="NDX" />
     </QueryClientProvider>,
   );
 
@@ -156,7 +156,7 @@ test("retries an initial candle request failure on demand", async () => {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <CandlestickChart />
+      <CandlestickChart symbol="NDX" />
     </QueryClientProvider>,
   );
 
@@ -195,7 +195,7 @@ test("keeps rendered candles when an older window fails and retries on demand", 
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <CandlestickChart />
+      <CandlestickChart symbol="NDX" />
     </QueryClientProvider>,
   );
 
@@ -221,7 +221,7 @@ test("removes the active chart instance when the chart unmounts", async () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const rendered = render(
     <QueryClientProvider client={queryClient}>
-      <CandlestickChart />
+      <CandlestickChart symbol="NDX" />
     </QueryClientProvider>,
   );
 

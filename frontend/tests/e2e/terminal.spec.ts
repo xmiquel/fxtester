@@ -41,6 +41,12 @@ const olderWindow = {
   has_more: false,
 };
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/symbols", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify({ symbols: ["NDX", "SPX"] }) }),
+  );
+});
+
 test("renders one bounded window and requests older history only after navigation", async ({ page }) => {
   const requests: string[] = [];
   await page.route("**/api/candles?**", async (route) => {
@@ -64,6 +70,31 @@ test("renders one bounded window and requests older history only after navigatio
     "data-candle-datetimes",
     "2025-01-01T00:01:00,2025-01-01T00:02:00,2025-01-01T00:03:00",
   );
+});
+
+test("selects a catalog symbol and resets candle requests to that symbol", async ({ page }) => {
+  const requests: string[] = [];
+  await page.route("**/api/candles?**", async (route) => {
+    requests.push(route.request().url());
+    const symbol = new URL(route.request().url()).searchParams.get("symbol") ?? "NDX";
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ...initialWindow, candles: initialWindow.candles.map((candle) => ({ ...candle, symbol })), symbol }),
+    });
+  });
+
+  await page.goto("/");
+  const selector = page.getByRole("combobox", { name: "Market symbol" });
+  await expect(selector).toHaveValue("NDX");
+  await page.getByRole("button", { name: "Load older candles" }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  await selector.selectOption("SPX");
+  await expect(page.getByRole("heading", { name: "SPX · 1m" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Older-window navigation is active." })).not.toBeVisible();
+  await expect.poll(() => requests.length).toBe(3);
+  expect(new URL(requests[0]).searchParams.get("symbol")).toBe("NDX");
+  expect(new URL(requests[2]).searchParams.get("symbol")).toBe("SPX");
+  expect(new URL(requests[2]).searchParams.has("cursor")).toBe(false);
 });
 
 test("retries an initial candle request failure on demand", async ({ page }) => {

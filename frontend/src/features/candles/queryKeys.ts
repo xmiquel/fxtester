@@ -5,6 +5,8 @@ export interface CandleWindowQueryKeyInput {
   limit: number;
 }
 
+export const symbolCatalogQueryKey = ["symbols"] as const;
+
 export function candleWindowQueryKey({
   symbol,
   timeframe,

@@ -31,7 +31,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/ | grep -Fq '<div id=\"root\"></div>' && wget -qO- http://127.0.0.1:5173/api/candles | grep -Fq '\"candles\"'"]
+      test: ["CMD-SHELL", "set -eu; html=$$(wget -qO- http://127.0.0.1:5173/); printf '%s' \"$$html\" | grep -Fq '<div id=\"root\"></div>'; printf '%s' \"$$html\" | grep -Fq '/src/main.tsx'; wget -qO- http://127.0.0.1:5173/src/main.tsx | grep -Fq 'createRoot'"]
       interval: 10s
       timeout: 5s
       retries: 3

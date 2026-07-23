@@ -8,8 +8,10 @@ This workspace contains the bounded, read-only trading terminal foundation and i
 2. Set `IMAGE_VERSION` and `BUILD_REVISION` to the published Git commit identifier, then run
    `docker compose up --build`.
 3. Verify `curl http://localhost:8000/ready` returns `{"status":"ready"}`.
-4. Open `http://localhost:5173` to view the NDX `1m` candlestick chart. Use **Load older candles**
-   only when you want the next bounded history window.
+4. Open `http://localhost:5173`. The terminal fetches `/symbols`, selects the deterministic first
+   symbol, and lets you select any discovered symbol for its `1m` chart. Empty and unavailable
+   catalogs render accessible states without a candle request. Use **Load older candles** only when
+   you want the next bounded history window.
 
 If Compose reports that `/data/market.duckdb` cannot be mounted, check the host path in
 `docker-compose.yml`, confirm the file exists, and retry after correcting the path. A 503 from
@@ -21,7 +23,7 @@ inspect the backend logs before changing the mount.
 - The source is mounted at `/data/market.duckdb` as a read-only bind mount.
 - The API reads `dt_ohlc_m1` and returns source column names unchanged, including `OPEN` and `close`.
 - Requests are filtered, ordered, and limited in DuckDB; each response contains at most 200 candles.
-- This slice exposes only `NDX` `1m` analysis data. It has no ingestion, writes, orders, auth, live feed, or timeframe selector.
+- This slice exposes discovered-symbol `1m` analysis data. It has no ingestion, writes, orders, auth, live feed, or timeframe selector.
 - The source bind mount is immutable. Backend tests use isolated temporary DuckDB files and never
   the mounted source.
 
@@ -39,13 +41,16 @@ inspect the backend logs before changing the mount.
 
 ## Frontend boundary
 
-- The terminal renders one NDX `1m` candlestick chart. It has no symbol selector, timeframe
-  selector, orders, authentication, or aggregation UI.
+- The terminal offers a selector for the deterministic, read-only `/symbols` catalog and keys each
+  bounded candle window by the selected symbol. It has no timeframe selector, orders,
+  authentication, or aggregation UI.
 - The generated TypeScript candle contract is in `frontend/src/api/generated.ts`. Regenerate it
   after exporting `backend/openapi.json` with `npm run generate:api --prefix frontend`.
 - TanStack Query caches cursor windows by symbol, timeframe, cursor, and limit. It retains at most
   three pages, so older history is requested only after **Load older candles** is selected.
 - Future concurrent charts can share identical market windows, but this slice intentionally shows
   only one chart.
+- Compose frontend health checks the served browser document and Vite module entrypoint; the Compose
+  browser test additionally proves the React selector and chart execute against the proxied API.
 
 Run backend checks from `backend/` with `uv run pytest --cov=app`, `uv run ruff check .`, `uv run mypy app`, and `uv run pip-audit`. Run frontend checks with `npm run build --prefix frontend`, `npm run lint --prefix frontend`, `npm test --prefix frontend`, and `npm run e2e --prefix frontend`.
