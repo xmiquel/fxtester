@@ -147,12 +147,28 @@ jobs:
              export MARKET_DATABASE_PATH="$ORIGINAL_MARKET_DATABASE_PATH"
            docker compose --project-name "ci-${{ github.sha }}" up --detach --force-recreate backend frontend
            RECOVERED=false
-           for _ in $(seq 1 30); do
-             if curl --fail --silent --show-error http://127.0.0.1:8000/ready && curl --fail --silent --show-error http://127.0.0.1:8000/candles | jq -e '.symbol == "NDX"' > /dev/null; then
+            for _ in $(seq 1 20); do
+              READY_STATUS_FILE="$RUNNER_TEMP/recovered-ready-status"
+              CANDLES_STATUS_FILE="$RUNNER_TEMP/recovered-candles-status"
+              : > "$READY_STATUS_FILE"
+              : > "$CANDLES_STATUS_FILE"
+              : > "$RUNNER_TEMP/recovered-ready.json"
+              : > "$RUNNER_TEMP/recovered-candles.json"
+             curl --silent --show-error --connect-timeout 1 --max-time 1 --output "$RUNNER_TEMP/recovered-ready.json" --write-out '%{http_code}' http://127.0.0.1:8000/ready > "$READY_STATUS_FILE" &
+             READY_PID=$!
+             curl --silent --show-error --connect-timeout 1 --max-time 1 --output "$RUNNER_TEMP/recovered-candles.json" --write-out '%{http_code}' http://127.0.0.1:8000/candles > "$CANDLES_STATUS_FILE" &
+             CANDLES_PID=$!
+             wait "$READY_PID" || true
+             wait "$CANDLES_PID" || true
+             READY_STATUS="$(cat "$READY_STATUS_FILE" || printf '000')"
+             CANDLES_STATUS="$(cat "$CANDLES_STATUS_FILE" || printf '000')"
+             if test "$READY_STATUS" = 200 && jq -e '.status == "ready"' "$RUNNER_TEMP/recovered-ready.json" > /dev/null && test "$CANDLES_STATUS" = 200 && jq -e '.symbol == "NDX"' "$RUNNER_TEMP/recovered-candles.json" > /dev/null; then
                RECOVERED=true
                break
              fi
-             sleep 2
+              if test "$_" -lt 20; then
+                sleep 2
+              fi
            done
            if [ "$RECOVERED" != true ]; then
              echo "Backend readiness and /candles recovery did not succeed within 60 seconds." >&2
