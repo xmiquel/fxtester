@@ -146,10 +146,16 @@ jobs:
              jq -e '.type == "service_unavailable" and .title == "Market data service unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-candles.json" > /dev/null
              export MARKET_DATABASE_PATH="$ORIGINAL_MARKET_DATABASE_PATH"
            docker compose --project-name "ci-${{ github.sha }}" up --detach --force-recreate backend frontend
+           RECOVERED=false
            for _ in $(seq 1 30); do
              if curl --fail --silent --show-error http://127.0.0.1:8000/ready && curl --fail --silent --show-error http://127.0.0.1:8000/candles | jq -e '.symbol == "NDX"' > /dev/null; then
+               RECOVERED=true
                break
              fi
              sleep 2
            done
-           curl --fail --silent --show-error http://127.0.0.1:8000/candles | jq -e '.symbol == "NDX"' > /dev/null
+           if [ "$RECOVERED" != true ]; then
+             echo "Backend readiness and /candles recovery did not succeed within 60 seconds." >&2
+             docker compose --project-name "ci-${{ github.sha }}" logs backend frontend >&2
+             exit 1
+           fi
