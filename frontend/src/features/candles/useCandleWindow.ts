@@ -13,7 +13,7 @@ const CACHE_TIME_MS = 5 * 60 * 1000;
 interface CandleWindowParams {
   enabled?: boolean;
   symbol: string;
-  timeframe: "1m";
+  timeframe: string;
   limit?: number;
 }
 

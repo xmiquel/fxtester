@@ -8,7 +8,7 @@ const DEFAULT_API_BASE_URL = "/api";
 
 interface FetchCandleWindowInput {
   symbol: string;
-  timeframe: "1m";
+  timeframe: string;
   cursor: string | null;
   limit: number;
   signal: AbortSignal;
@@ -43,6 +43,10 @@ async function fetchApiJson<T>(path: string, signal: AbortSignal, unavailableMes
 
 export function fetchSymbols({ signal }: FetchSymbolsInput): Promise<SymbolCatalog> {
   return fetchApiJson<SymbolCatalog>("/symbols", signal, "Unable to load market symbols");
+}
+
+export function fetchTimeframes(signal: AbortSignal): Promise<string[]> {
+  return fetchApiJson<string[]>("/timeframes", signal, "Unable to load timeframes");
 }
 
 export async function fetchCandleWindow({

@@ -1,6 +1,6 @@
 export interface CandleWindowQueryKeyInput {
   symbol: string;
-  timeframe: "1m";
+  timeframe: string;
   cursor: string | null;
   limit: number;
 }
