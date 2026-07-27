@@ -30,6 +30,7 @@ test("selects the first catalog symbol and isolates the next candle request by s
   const candleSymbols: string[] = [];
   server.use(
     http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["DAX", "SPX"] })),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "5m", "15m", "1h"])),
     http.get("*/api/candles", ({ request }) => {
       const symbol = new URL(request.url).searchParams.get("symbol");
       candleSymbols.push(symbol ?? "");
@@ -48,6 +49,27 @@ test("selects the first catalog symbol and isolates the next candle request by s
   expect(candleSymbols).toEqual(["DAX", "SPX"]);
 });
 
+test("renders timeframe selector and switches timeframe", async () => {
+  server.use(
+    http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "5m", "15m", "1h"])),
+    http.get("*/api/candles", ({ request }) => {
+      const timeframe = new URL(request.url).searchParams.get("timeframe") ?? "1m";
+      return HttpResponse.json({ candles: [], has_more: false, next_cursor: null, symbol: "NDX", timeframe });
+    }),
+  );
+
+  renderApp();
+
+  const timeframeSelector = await screen.findByRole("combobox", { name: "Timeframe" });
+  expect(timeframeSelector).toHaveValue("1m");
+  expect(await screen.findByText("No NDX 1m candles are available.")).toBeInTheDocument();
+
+  fireEvent.change(timeframeSelector, { target: { value: "5m" } });
+  expect(await screen.findByText("No NDX 5m candles are available.")).toBeInTheDocument();
+  expect(screen.getByText("Selected symbol · 5m")).toBeInTheDocument();
+});
+
 test("renders empty and retryable catalog states without requesting candles", async () => {
   let candleRequests = 0;
   let catalogAttempts = 0;
@@ -56,6 +78,7 @@ test("renders empty and retryable catalog states without requesting candles", as
       catalogAttempts += 1;
       return catalogAttempts === 1 ? new HttpResponse(null, { status: 503 }) : HttpResponse.json({ symbols: [] });
     }),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "5m", "15m", "1h"])),
     http.get("*/api/candles", () => {
       candleRequests += 1;
       return HttpResponse.json({});

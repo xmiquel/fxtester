@@ -31,7 +31,7 @@ function isCandleWindow(value: unknown, expectedSymbol: string): value is Candle
   const window = value as Partial<CandleWindow>;
   return (
     window.symbol === expectedSymbol &&
-    window.timeframe === "1m" &&
+    typeof window.timeframe === "string" &&
     typeof window.has_more === "boolean" &&
     Array.isArray(window.candles) &&
     window.candles.length > 0 &&

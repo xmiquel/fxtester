@@ -45,6 +45,9 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/symbols", (route) =>
     route.fulfill({ contentType: "application/json", body: JSON.stringify({ symbols: ["NDX", "SPX"] }) }),
   );
+  await page.route("**/api/timeframes", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(["1m", "5m", "15m", "1h"]) }),
+  );
 });
 
 test("renders one bounded window and requests older history only after navigation", async ({ page }) => {

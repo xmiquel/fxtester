@@ -5,7 +5,7 @@ vi.mock("../../src/observability", () => ({
   reportClientEvent: vi.fn(),
 }));
 
-import { fetchCandleWindow, fetchSymbols } from "../../src/features/candles/api";
+import { fetchCandleWindow, fetchSymbols, fetchTimeframes } from "../../src/features/candles/api";
 import { CLIENT_EVENT_KIND, reportClientEvent } from "../../src/observability";
 
 test("forwards the query AbortSignal to fetch", async () => {
@@ -47,6 +47,18 @@ test("reports and rejects an unavailable symbol catalog", async () => {
     CLIENT_EVENT_KIND.API_FAILURE,
     expect.objectContaining({ message: "Unable to load market symbols (503)" }),
   );
+  fetchMock.mockRestore();
+});
+
+test("fetches and returns the available timeframes", async () => {
+  const controller = new AbortController();
+  const timeframes = ["1m", "5m", "15m", "1h"];
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(timeframes), { status: 200 }),
+  );
+
+  await expect(fetchTimeframes(controller.signal)).resolves.toEqual(timeframes);
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/timeframes"), { signal: controller.signal });
   fetchMock.mockRestore();
 });
 
