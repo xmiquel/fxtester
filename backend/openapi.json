@@ -152,6 +152,111 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ServiceUnavailable": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "const": "service_unavailable",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "detail"
+        ],
+        "title": "ServiceUnavailable",
+        "type": "object"
+      },
+      "SymbolCatalog": {
+        "properties": {
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Symbols",
+            "type": "array"
+          }
+        },
+        "required": [
+          "symbols"
+        ],
+        "title": "SymbolCatalog",
+        "type": "object"
+      },
+      "UnsupportedSymbol": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "const": "unsupported_symbol",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "detail",
+          "symbol"
+        ],
+        "title": "UnsupportedSymbol",
+        "type": "object"
+      },
+      "UnsupportedTimeframe": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "timeframe": {
+            "title": "Timeframe",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "const": "unsupported_timeframe",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "detail",
+          "timeframe"
+        ],
+        "title": "UnsupportedTimeframe",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -209,9 +314,15 @@
             "name": "symbol",
             "required": false,
             "schema": {
-              "default": "NDX",
-              "title": "Symbol",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Symbol"
             }
           },
           {
@@ -263,6 +374,21 @@
             "description": "Successful Response"
           },
           "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/UnsupportedSymbol"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnsupportedTimeframe"
+                    }
+                  ],
+                  "title": "Response 400 Candles Candles Get"
+                }
+              }
+            },
             "description": "The requested symbol or timeframe is not supported by this candle slice."
           },
           "422": {
@@ -274,6 +400,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailable"
+                }
+              }
+            },
+            "description": "The market source cannot be read."
           }
         },
         "summary": "Candles",
@@ -368,6 +504,37 @@
         "summary": "Ready",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/symbols": {
+      "get": {
+        "operationId": "symbols_symbols_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SymbolCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailable"
+                }
+              }
+            },
+            "description": "The market symbol catalog cannot be read from the source."
+          }
+        },
+        "summary": "Symbols",
+        "tags": [
+          "candles"
         ]
       }
     }

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { candleWindowQueryKey } from "../../src/features/candles/queryKeys";
+import { candleWindowQueryKey, symbolCatalogQueryKey } from "../../src/features/candles/queryKeys";
 import { candleWindowPolicy } from "../../src/features/candles/useCandleWindow";
 
 test("market window keys include symbol, timeframe, cursor, and limit without chart identity", () => {
@@ -16,4 +16,8 @@ test("market window keys include symbol, timeframe, cursor, and limit without ch
 test("window retention stays bounded", () => {
   expect(candleWindowPolicy.maxPages).toBe(3);
   expect(candleWindowPolicy.limit).toBe(200);
+});
+
+test("symbol catalog uses a stable shared query key", () => {
+  expect(symbolCatalogQueryKey).toEqual(["symbols"]);
 });

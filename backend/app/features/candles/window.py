@@ -9,10 +9,10 @@ import duckdb
 from fastapi import HTTPException
 
 SOURCE_DATABASE = Path("/data/market.duckdb")
-SUPPORTED_SYMBOL = "NDX"
 SUPPORTED_TIMEFRAME = "1m"
 SOURCE_TABLE = "dt_ohlc_m1"
 CANDLE_WINDOW_LIMIT = 200
+OMITTED_SYMBOL_COMPATIBILITY_DEFAULT = "NDX"
 SOURCE_COLUMNS = (
     "datetime",
     "symbol",
@@ -57,6 +57,12 @@ SOURCE_TO_CONTRACT_FIELDS = (
     ("fecha_carga", "fecha_carga"),
 )
 DATABASE_AVAILABILITY_QUERY = f"SELECT 1 FROM {SOURCE_TABLE} LIMIT 1"  # noqa: S608
+SYMBOL_CATALOG_QUERY = f"""
+    SELECT DISTINCT symbol
+    FROM {SOURCE_TABLE}
+    WHERE symbol IS NOT NULL AND TRIM(symbol) <> ''
+    ORDER BY symbol
+"""  # noqa: S608 - identifier is a module constant
 
 
 @dataclass(frozen=True)
@@ -70,8 +76,27 @@ class DatabaseUnavailable(RuntimeError):
     """Raised when the configured source cannot be opened or queried."""
 
 
+class UnsupportedSymbolError(ValueError):
+    """Raised when a candle request does not name a current catalog symbol."""
+
+    def __init__(self, symbol: str) -> None:
+        self.symbol = symbol
+        message = f"Symbol '{symbol}' is not present in the discovered catalog."
+        super().__init__(message)
+
+
+class UnsupportedTimeframeError(ValueError):
+    """Raised when a candle request uses a timeframe outside this slice."""
+
+    def __init__(self, timeframe: str) -> None:
+        self.timeframe = timeframe
+        super().__init__(f"Only timeframe '{SUPPORTED_TIMEFRAME}' is supported")
+
+
 class CandleRepository(Protocol):
     def check_available(self) -> None: ...
+
+    def list_symbols(self) -> list[str]: ...
 
     def read_window(
         self, symbol: str, cursor: datetime | None, limit: int
@@ -125,6 +150,14 @@ class DuckDbCandleRepository:
         next_cursor = candles[0]["datetime"].isoformat() if has_more and candles else None
         return CandleWindow(candles=candles, next_cursor=next_cursor, has_more=has_more)
 
+    def list_symbols(self) -> list[str]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                rows = connection.execute(SYMBOL_CATALOG_QUERY).fetchall()
+        except (duckdb.Error, OSError) as error:
+            raise DatabaseUnavailable("market database is unavailable") from error
+        return [symbol for (symbol,) in rows]
+
     def check_available(self) -> None:
         try:
             with duckdb.connect(str(self.database_path), read_only=True) as connection:
@@ -138,18 +171,10 @@ class CandleWindowService:
         self.repository = repository
 
     def get_window(
-        self, symbol: str, timeframe: str, cursor: str | None, limit: int
+        self, symbol: str | None, timeframe: str, cursor: str | None, limit: int
     ) -> dict[str, object]:
-        if symbol != SUPPORTED_SYMBOL:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Only symbol '{SUPPORTED_SYMBOL}' is supported",
-            )
         if timeframe != SUPPORTED_TIMEFRAME:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Only timeframe '{SUPPORTED_TIMEFRAME}' is supported",
-            )
+            raise UnsupportedTimeframeError(timeframe)
         if limit < 1 or limit > CANDLE_WINDOW_LIMIT:
             raise HTTPException(
                 status_code=422,
@@ -161,14 +186,21 @@ class CandleWindowService:
                 parsed_cursor = datetime.fromisoformat(cursor)
             except ValueError as error:
                 raise HTTPException(status_code=422, detail="cursor must be ISO-8601") from error
-        window = self.repository.read_window(symbol, parsed_cursor, limit)
+        catalog = self.repository.list_symbols()
+        effective_symbol = OMITTED_SYMBOL_COMPATIBILITY_DEFAULT if symbol is None else symbol
+        if effective_symbol not in catalog:
+            raise UnsupportedSymbolError(effective_symbol)
+        window = self.repository.read_window(effective_symbol, parsed_cursor, limit)
         return {
-            "symbol": symbol,
+            "symbol": effective_symbol,
             "timeframe": timeframe,
             "candles": window.candles,
             "next_cursor": window.next_cursor,
             "has_more": window.has_more,
         }
+
+    def list_symbols(self) -> list[str]:
+        return self.repository.list_symbols()
 
     def check_database(self) -> None:
         self.repository.check_available()

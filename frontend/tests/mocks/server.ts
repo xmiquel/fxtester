@@ -2,6 +2,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 
 export const server = setupServer(
+  http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
   http.get("*/api/candles", () =>
     HttpResponse.json({
       symbol: "NDX",

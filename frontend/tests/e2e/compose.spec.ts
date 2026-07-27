@@ -15,18 +15,22 @@ interface CandleWindow {
   timeframe: string;
 }
 
+interface SymbolCatalog {
+  symbols: string[];
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function isCandleWindow(value: unknown): value is CandleWindow {
+function isCandleWindow(value: unknown, expectedSymbol: string): value is CandleWindow {
   if (typeof value !== "object" || value === null) {
     return false;
   }
 
   const window = value as Partial<CandleWindow>;
   return (
-    window.symbol === "NDX" &&
+    window.symbol === expectedSymbol &&
     window.timeframe === "1m" &&
     typeof window.has_more === "boolean" &&
     Array.isArray(window.candles) &&
@@ -43,19 +47,27 @@ function isCandleWindow(value: unknown): value is CandleWindow {
   );
 }
 
-test("Compose serves an executed React chart backed by the proxied candle API", async ({ page }) => {
+test("Compose serves an executed React chart with a selected catalog symbol", async ({ page }) => {
+  const catalogResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/symbols" && response.status() === 200,
+  );
   const candleResponse = page.waitForResponse(
     (response) => new URL(response.url()).pathname === "/api/candles" && response.status() === 200,
   );
   await page.goto("/");
+  const catalog: unknown = await (await catalogResponse).json();
+  expect(catalog).toEqual(expect.objectContaining({ symbols: expect.any(Array) }));
+  const selectedSymbol = (catalog as SymbolCatalog).symbols[0];
+  expect(selectedSymbol).toEqual(expect.any(String));
   const candleWindow: unknown = await (await candleResponse).json();
 
-  expect(isCandleWindow(candleWindow)).toBe(true);
-  if (!isCandleWindow(candleWindow)) {
+  expect(isCandleWindow(candleWindow, selectedSymbol)).toBe(true);
+  if (!isCandleWindow(candleWindow, selectedSymbol)) {
     return;
   }
 
   await expect(page.getByRole("heading", { name: "Trading Terminal" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Market symbol" })).toHaveValue(selectedSymbol);
   const chartHistory = page.getByTestId("chart-history");
   await expect(chartHistory).toHaveAttribute("data-candle-datetimes", /.+/);
   const renderedDatetimes = (await chartHistory.getAttribute("data-candle-datetimes"))?.split(",") ?? [];
