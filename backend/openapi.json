@@ -537,6 +537,31 @@
           "candles"
         ]
       }
+    },
+    "/timeframes": {
+      "get": {
+        "operationId": "timeframes_timeframes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Timeframes Timeframes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Timeframes",
+        "tags": [
+          "candles"
+        ]
+      }
     }
   }
 }
