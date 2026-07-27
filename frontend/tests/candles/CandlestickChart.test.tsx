@@ -7,6 +7,7 @@ import { CandlestickChart } from "../../src/features/candles/CandlestickChart";
 import { server } from "../mocks/server";
 
 const chartInstances = vi.hoisted((): Array<{ remove: ReturnType<typeof vi.fn>; setData: ReturnType<typeof vi.fn> }> => []);
+const rangeHandlers = vi.hoisted((): Array<(range: { from: number; to: number } | null) => void> => []);
 
 vi.mock("lightweight-charts", () => ({
   CandlestickSeries: {},
@@ -18,7 +19,11 @@ vi.mock("lightweight-charts", () => ({
       addSeries: () => ({ setData: instance.setData }),
       applyOptions: vi.fn(),
       remove: instance.remove,
-      timeScale: () => ({ fitContent: vi.fn() }),
+      timeScale: () => ({
+        fitContent: vi.fn(),
+        subscribeVisibleLogicalRangeChange: vi.fn((handler) => { rangeHandlers.push(handler); }),
+        unsubscribeVisibleLogicalRangeChange: vi.fn(),
+      }),
     };
   }),
 }));
@@ -50,6 +55,7 @@ test("renders an empty state when the bounded window contains no candles", async
 
 test("renders chronological, duplicate-free candles from adjacent cursor windows", async () => {
   chartInstances.length = 0;
+  rangeHandlers.length = 0;
   server.use(
     http.get("*/api/candles", ({ request }) => {
       const cursor = new URL(request.url).searchParams.get("cursor");
@@ -82,7 +88,8 @@ test("renders chronological, duplicate-free candles from adjacent cursor windows
     </QueryClientProvider>,
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "Load older candles" }));
+  await screen.findByTestId("chart-history");
+  rangeHandlers[rangeHandlers.length - 1]?.({ from: 0, to: 10 });
 
   await expect(screen.findByTestId("chart-history")).resolves.toHaveAttribute(
     "data-candle-datetimes",
@@ -98,6 +105,7 @@ test("renders chronological, duplicate-free candles from adjacent cursor windows
 });
 
 test("the production candle hook evicts the oldest window after three older pages", async () => {
+  rangeHandlers.length = 0;
   server.use(
     http.get("*/api/candles", ({ request }) => {
       const cursor = new URL(request.url).searchParams.get("cursor");
@@ -124,18 +132,20 @@ test("the production candle hook evicts the oldest window after three older page
     </QueryClientProvider>,
   );
 
-  const button = await screen.findByRole("button", { name: "Load older candles" });
-  fireEvent.click(button);
+  const getHandler = () => rangeHandlers[rangeHandlers.length - 1];
+
+  await screen.findByTestId("chart-history");
+  getHandler()?.({ from: 0, to: 10 });
   await expect(screen.findByTestId("chart-history")).resolves.toHaveAttribute(
     "data-candle-datetimes",
     "2025-01-01T00:03:00,2025-01-01T00:04:00",
   );
-  fireEvent.click(button);
+  getHandler()?.({ from: 0, to: 10 });
   await expect(screen.findByTestId("chart-history")).resolves.toHaveAttribute(
     "data-candle-datetimes",
     "2025-01-01T00:02:00,2025-01-01T00:03:00,2025-01-01T00:04:00",
   );
-  fireEvent.click(button);
+  getHandler()?.({ from: 0, to: 10 });
   await expect(screen.findByTestId("chart-history")).resolves.toHaveAttribute(
     "data-candle-datetimes",
     "2025-01-01T00:01:00,2025-01-01T00:02:00,2025-01-01T00:03:00",
@@ -168,6 +178,7 @@ test("retries an initial candle request failure on demand", async () => {
 
 test("keeps rendered candles when an older window fails and retries on demand", async () => {
   let olderAttempts = 0;
+  rangeHandlers.length = 0;
   server.use(
     http.get("*/api/candles", ({ request }) => {
       if (new URL(request.url).searchParams.has("cursor")) {
@@ -199,7 +210,8 @@ test("keeps rendered candles when an older window fails and retries on demand", 
     </QueryClientProvider>,
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "Load older candles" }));
+  await screen.findByTestId("chart-history");
+  rangeHandlers[rangeHandlers.length - 1]?.({ from: 0, to: 10 });
   expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load candles (503)");
   expect(screen.getByTestId("chart-history")).toHaveAttribute("data-candle-datetimes", candle.datetime);
 

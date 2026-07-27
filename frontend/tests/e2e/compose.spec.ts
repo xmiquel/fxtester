@@ -73,10 +73,5 @@ test("Compose serves an executed React chart with a selected catalog symbol", as
   const renderedDatetimes = (await chartHistory.getAttribute("data-candle-datetimes"))?.split(",") ?? [];
   expect(renderedDatetimes).toEqual(expect.arrayContaining(candleWindow.candles.map((candle) => candle.datetime)));
 
-  const loadOlder = page.getByRole("button", { name: "Load older candles" });
-  if (candleWindow.has_more) {
-    await expect(loadOlder).toBeEnabled();
-  } else {
-    await expect(loadOlder).toBeDisabled();
-  }
+  // Auto-load behavior (chart pan to start) is tested in component tests.
 });
