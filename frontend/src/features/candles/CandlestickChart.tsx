@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, type CandlestickData, type Time } from "lightweight-charts";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import type { components } from "../../api/generated";
 import { useCandleWindow } from "./useCandleWindow";
@@ -24,11 +24,16 @@ function asChartData(candles: Candle[]): CandlestickData<Time>[] {
 
 interface ChartCanvasProps {
   candles: Candle[];
+  hasMore: boolean;
+  isLoading: boolean;
+  onReachStart: () => void;
   symbol: string;
   timeframe: string;
 }
 
-function ChartCanvas({ candles, symbol, timeframe }: ChartCanvasProps) {
+const VISIBLE_RANGE_NEAR_START_THRESHOLD = 3;
+
+function ChartCanvas({ candles, hasMore, isLoading, onReachStart, symbol, timeframe }: ChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,13 +52,21 @@ function ChartCanvas({ candles, symbol, timeframe }: ChartCanvasProps) {
     series.setData(asChartData(candles));
     chart.timeScale().fitContent();
 
+    const handleVisibleRange = (range: { from: number; to: number } | null) => {
+      if (range && range.from <= VISIBLE_RANGE_NEAR_START_THRESHOLD && hasMore && !isLoading) {
+        onReachStart();
+      }
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRange);
+
     const resize = () => chart.applyOptions({ width: container.clientWidth });
     window.addEventListener("resize", resize);
     return () => {
       window.removeEventListener("resize", resize);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRange);
       chart.remove();
     };
-  }, [candles]);
+  }, [candles, hasMore, isLoading, onReachStart]);
 
   return (
     <div
@@ -72,13 +85,14 @@ interface CandlestickChartProps {
 }
 
 export function CandlestickChart({ symbol, timeframe }: CandlestickChartProps) {
-  const [requestedOlderWindow, setRequestedOlderWindow] = useState(false);
   const windowQuery = useCandleWindow({ symbol, timeframe });
   const candles = chronologicalUniqueCandles(windowQuery.data?.pages.flatMap((page) => page.candles) ?? []);
 
-  useEffect(() => {
-    setRequestedOlderWindow(false);
-  }, [symbol]);
+  const handleReachStart = useCallback(() => {
+    if (windowQuery.hasNextPage && !windowQuery.isFetchingNextPage) {
+      void windowQuery.fetchNextPage();
+    }
+  }, [windowQuery]);
 
   if (windowQuery.isPending) {
     return <p role="status">Loading {symbol} {timeframe} candles…</p>;
@@ -104,18 +118,8 @@ export function CandlestickChart({ symbol, timeframe }: CandlestickChartProps) {
           <p className="eyebrow">Bounded window</p>
           <h2 id="chart-title">{symbol} · {timeframe}</h2>
         </div>
-        <button
-          disabled={!windowQuery.hasNextPage || windowQuery.isFetchingNextPage}
-          onClick={() => {
-            setRequestedOlderWindow(true);
-            void windowQuery.fetchNextPage();
-          }}
-          type="button"
-        >
-          {windowQuery.isFetchingNextPage ? "Loading older candles…" : "Load older candles"}
-        </button>
+        {windowQuery.isFetchingNextPage && <p role="status">Loading older candles…</p>}
       </div>
-      {requestedOlderWindow && <p role="status">Older-window navigation is active.</p>}
       {windowQuery.isFetchNextPageError && (
         <div role="alert">
           <p>{windowQuery.error.message}</p>
@@ -124,7 +128,14 @@ export function CandlestickChart({ symbol, timeframe }: CandlestickChartProps) {
           </button>
         </div>
       )}
-      <ChartCanvas candles={candles} symbol={symbol} timeframe={timeframe} />
+      <ChartCanvas
+        candles={candles}
+        hasMore={windowQuery.hasNextPage}
+        isLoading={windowQuery.isFetchingNextPage}
+        onReachStart={handleReachStart}
+        symbol={symbol}
+        timeframe={timeframe}
+      />
     </section>
   );
 }
