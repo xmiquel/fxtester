@@ -132,18 +132,22 @@ jobs:
             chmod a-w "$UNAVAILABLE_MARKET_DATABASE_PATH"
             export MARKET_DATABASE_PATH="$UNAVAILABLE_MARKET_DATABASE_PATH"
             docker compose --project-name "ci-${{ github.sha }}" up --detach --force-recreate backend
-            for _ in $(seq 1 30); do
-              STATUS_CODE="$(curl --silent --show-error --output "$RUNNER_TEMP/unavailable-symbols.json" --write-out '%{http_code}' http://127.0.0.1:8000/symbols)"
-              if test "$STATUS_CODE" = 503 && jq -e '.type == "service_unavailable" and .title == "Market symbol catalog unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-symbols.json" > /dev/null; then
-                break
-              fi
-              sleep 2
-            done
-             test "$STATUS_CODE" = 503
-             jq -e '.type == "service_unavailable" and .title == "Market symbol catalog unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-symbols.json" > /dev/null
-             CANDLE_STATUS_CODE="$(curl --silent --show-error --output "$RUNNER_TEMP/unavailable-candles.json" --write-out '%{http_code}' http://127.0.0.1:8000/candles)"
-             test "$CANDLE_STATUS_CODE" = 503
-             jq -e '.type == "service_unavailable" and .title == "Market data service unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-candles.json" > /dev/null
+             for _ in $(seq 1 30); do
+               STATUS_CODE="$(curl --silent --show-error --output "$RUNNER_TEMP/unavailable-symbols.json" --write-out '%{http_code}' http://127.0.0.1:8000/symbols || true)"
+               if test "${STATUS_CODE:-000}" = 503 && jq -e '.type == "service_unavailable" and .title == "Market symbol catalog unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-symbols.json" > /dev/null 2>&1; then
+                 break
+               fi
+               sleep 2
+             done
+             if test "${STATUS_CODE:-000}" != 503 || ! jq -e '.type == "service_unavailable" and .title == "Market symbol catalog unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-symbols.json" > /dev/null 2>&1; then
+               echo "Backend did not return 503 for /symbols with unavailable database (STATUS_CODE=${STATUS_CODE:-empty})" >&2
+               exit 1
+             fi
+              CANDLE_STATUS_CODE="$(curl --silent --show-error --output "$RUNNER_TEMP/unavailable-candles.json" --write-out '%{http_code}' http://127.0.0.1:8000/candles || true)"
+             if test "${CANDLE_STATUS_CODE:-000}" != 503 || ! jq -e '.type == "service_unavailable" and .title == "Market data service unavailable" and .detail == "market database is unavailable"' "$RUNNER_TEMP/unavailable-candles.json" > /dev/null 2>&1; then
+               echo "Backend did not return 503 for /candles with unavailable database (CANDLE_STATUS_CODE=${CANDLE_STATUS_CODE:-empty})" >&2
+               exit 1
+             fi
              export MARKET_DATABASE_PATH="$ORIGINAL_MARKET_DATABASE_PATH"
            docker compose --project-name "ci-${{ github.sha }}" up --detach --force-recreate backend frontend
            RECOVERED=false
