@@ -153,7 +153,10 @@ class DuckDbCandleRepository:
                         parameters.append(cursor)
                     query = f"""
                         SELECT
-                          TIMESTAMP 'epoch' + (CAST(EXTRACT(epoch FROM datetime) AS BIGINT) // {bucket_seconds} * {bucket_seconds}) * INTERVAL '1 second' AS datetime,
+                          TIMESTAMP 'epoch' + (
+                            CAST(EXTRACT(epoch FROM datetime) AS BIGINT)
+                            // {bucket_seconds} * {bucket_seconds}
+                          ) * INTERVAL '1 second' AS datetime,
                           symbol,
                           FIRST("OPEN" ORDER BY datetime) AS open,
                           MAX(high) AS high, MIN(low) AS low,
