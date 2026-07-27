@@ -9,7 +9,16 @@ import duckdb
 from fastapi import HTTPException
 
 SOURCE_DATABASE = Path("/data/market.duckdb")
-SUPPORTED_TIMEFRAME = "1m"
+SUPPORTED_TIMEFRAMES: frozenset[str] = frozenset({"1m", "5m", "15m", "1h"})
+DEFAULT_TIMEFRAME: str = "1m"
+# Epoch seconds for each timeframe — used for floor-division binning via
+#   TIMESTAMP 'epoch' + (epoch_seconds // bucket_seconds * bucket_seconds) * INTERVAL '1 second'
+TIMEFRAME_BUCKET_SECONDS: dict[str, int] = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "1h": 3600,
+}
 SOURCE_TABLE = "dt_ohlc_m1"
 CANDLE_WINDOW_LIMIT = 200
 OMITTED_SYMBOL_COMPATIBILITY_DEFAULT = "NDX"
@@ -90,7 +99,8 @@ class UnsupportedTimeframeError(ValueError):
 
     def __init__(self, timeframe: str) -> None:
         self.timeframe = timeframe
-        super().__init__(f"Only timeframe '{SUPPORTED_TIMEFRAME}' is supported")
+        supported = sorted(SUPPORTED_TIMEFRAMES, key=lambda tf: TIMEFRAME_BUCKET_SECONDS[tf])
+        super().__init__(f"Unsupported timeframe '{timeframe}'. Supported: {supported}")
 
 
 class CandleRepository(Protocol):
@@ -98,8 +108,10 @@ class CandleRepository(Protocol):
 
     def list_symbols(self) -> list[str]: ...
 
+    def list_timeframes(self) -> list[str]: ...
+
     def read_window(
-        self, symbol: str, cursor: datetime | None, limit: int
+        self, symbol: str, timeframe: str, cursor: datetime | None, limit: int
     ) -> CandleWindow: ...
 
 
@@ -108,29 +120,54 @@ class DuckDbCandleRepository:
         self.database_path = database_path
 
     def read_window(
-        self, symbol: str, cursor: datetime | None, limit: int
+        self, symbol: str, timeframe: str, cursor: datetime | None, limit: int
     ) -> CandleWindow:
         try:
             # The connection is read-only and the limit is applied by DuckDB.
             with duckdb.connect(str(self.database_path), read_only=True) as connection:
-                parameters: list[object] = [symbol]
-                if cursor is None:
-                    query = f"""
-                        SELECT {SOURCE_COLUMN_SQL}
-                        FROM {SOURCE_TABLE}
-                        WHERE symbol = ?
-                        ORDER BY datetime DESC
-                        LIMIT ?
-                    """  # noqa: S608 - identifiers are module constants
+                if timeframe == "1m":
+                    parameters: list[object] = [symbol]
+                    if cursor is None:
+                        query = f"""
+                            SELECT {SOURCE_COLUMN_SQL}
+                            FROM {SOURCE_TABLE}
+                            WHERE symbol = ?
+                            ORDER BY datetime DESC
+                            LIMIT ?
+                        """  # noqa: S608 - identifiers are module constants
+                    else:
+                        query = f"""
+                            SELECT {SOURCE_COLUMN_SQL}
+                            FROM {SOURCE_TABLE}
+                            WHERE symbol = ? AND datetime < ?
+                            ORDER BY datetime DESC
+                            LIMIT ?
+                        """  # noqa: S608 - identifiers are module constants
+                        parameters.append(cursor)
                 else:
+                    bucket_seconds = TIMEFRAME_BUCKET_SECONDS[timeframe]
+                    parameters = [symbol]
+                    where_clause = "WHERE symbol = ?"
+                    if cursor is not None:
+                        where_clause = "WHERE symbol = ? AND datetime < ?"
+                        parameters.append(cursor)
                     query = f"""
-                        SELECT {SOURCE_COLUMN_SQL}
+                        SELECT
+                          TIMESTAMP 'epoch' + (CAST(EXTRACT(epoch FROM datetime) AS BIGINT) // {bucket_seconds} * {bucket_seconds}) * INTERVAL '1 second' AS datetime,
+                          symbol,
+                          FIRST("OPEN" ORDER BY datetime) AS open,
+                          MAX(high) AS high, MIN(low) AS low,
+                          LAST("close" ORDER BY datetime) AS close,
+                          SUM(tickvol) AS tickvol, SUM(volume) AS volume,
+                          LAST(spread ORDER BY datetime) AS spread,
+                          LAST(origen ORDER BY datetime) AS origen,
+                          MAX(fecha_carga) AS fecha_carga
                         FROM {SOURCE_TABLE}
-                        WHERE symbol = ? AND datetime < ?
+                        {where_clause}
+                        GROUP BY datetime, symbol
                         ORDER BY datetime DESC
                         LIMIT ?
                     """  # noqa: S608 - identifiers are module constants
-                    parameters.append(cursor)
                 parameters.append(limit + 1)
                 rows = connection.execute(query, parameters).fetchall()
                 columns = [column[0] for column in connection.description]
@@ -158,6 +195,9 @@ class DuckDbCandleRepository:
             raise DatabaseUnavailable("market database is unavailable") from error
         return [symbol for (symbol,) in rows]
 
+    def list_timeframes(self) -> list[str]:
+        return sorted(SUPPORTED_TIMEFRAMES, key=lambda tf: TIMEFRAME_BUCKET_SECONDS[tf])
+
     def check_available(self) -> None:
         try:
             with duckdb.connect(str(self.database_path), read_only=True) as connection:
@@ -173,7 +213,7 @@ class CandleWindowService:
     def get_window(
         self, symbol: str | None, timeframe: str, cursor: str | None, limit: int
     ) -> dict[str, object]:
-        if timeframe != SUPPORTED_TIMEFRAME:
+        if timeframe not in SUPPORTED_TIMEFRAMES:
             raise UnsupportedTimeframeError(timeframe)
         if limit < 1 or limit > CANDLE_WINDOW_LIMIT:
             raise HTTPException(
@@ -190,7 +230,7 @@ class CandleWindowService:
         effective_symbol = OMITTED_SYMBOL_COMPATIBILITY_DEFAULT if symbol is None else symbol
         if effective_symbol not in catalog:
             raise UnsupportedSymbolError(effective_symbol)
-        window = self.repository.read_window(effective_symbol, parsed_cursor, limit)
+        window = self.repository.read_window(effective_symbol, timeframe, parsed_cursor, limit)
         return {
             "symbol": effective_symbol,
             "timeframe": timeframe,
@@ -201,6 +241,9 @@ class CandleWindowService:
 
     def list_symbols(self) -> list[str]:
         return self.repository.list_symbols()
+
+    def list_timeframes(self) -> list[str]:
+        return self.repository.list_timeframes()
 
     def check_database(self) -> None:
         self.repository.check_available()

@@ -202,15 +202,59 @@ def test_only_one_minute_timeframe_is_exposed(tmp_path) -> None:
     make_database(str(database), count=1)
     client = TestClient(create_app(DuckDbCandleRepository(database)))
 
-    response = client.get("/candles", params={"symbol": "NDX", "timeframe": "5m"})
+    response = client.get("/candles", params={"symbol": "NDX", "timeframe": "2m"})
 
     assert response.status_code == 400
     assert response.json() == {
         "type": "unsupported_timeframe",
         "title": "Unsupported candle timeframe",
-        "detail": "Only timeframe '1m' is supported",
-        "timeframe": "5m",
+        "detail": "Unsupported timeframe '2m'. Supported: ['1m', '5m', '15m', '1h']",
+        "timeframe": "2m",
     }
+
+
+@pytest.mark.parametrize("timeframe", ["1m", "5m", "15m", "1h"])
+def test_supported_timeframes_return_200(tmp_path, timeframe: str) -> None:
+    database = tmp_path / "market.duckdb"
+    # Insert enough 1m rows (at least 60 for 1h aggregation)
+    make_database(str(database), count=65)
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.get("/candles", params={"symbol": "NDX", "timeframe": timeframe})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["timeframe"] == timeframe
+    assert body["symbol"] == "NDX"
+    assert len(body["candles"]) > 0
+    for candle in body["candles"]:
+        assert candle["OPEN"] == 1.0
+        assert candle["high"] == 2.0
+        assert candle["low"] == 0.5
+        assert candle["close"] == 1.5
+        assert candle["symbol"] == "NDX"
+
+
+def test_omitted_timeframe_defaults_to_1m(tmp_path) -> None:
+    database = tmp_path / "market.duckdb"
+    make_database(str(database), count=5)
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.get("/candles", params={"symbol": "NDX"})
+
+    assert response.status_code == 200
+    assert response.json()["timeframe"] == "1m"
+
+
+def test_timeframes_endpoint(tmp_path) -> None:
+    database = tmp_path / "market.duckdb"
+    make_database(str(database), count=1)
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.get("/timeframes")
+
+    assert response.status_code == 200
+    assert response.json() == ["1m", "5m", "15m", "1h"]
 
 
 def test_cursor_windows_are_ordered_and_non_overlapping(tmp_path) -> None:
@@ -415,7 +459,7 @@ def test_source_read_does_not_write_database(tmp_path) -> None:
 def test_database_failure_is_typed_at_repository_boundary(tmp_path) -> None:
     repository = DuckDbCandleRepository(tmp_path / "missing.duckdb")
     with pytest.raises(DatabaseUnavailable):
-        repository.read_window("NDX", None, 1)
+        repository.read_window("NDX", "1m", None, 1)
 
 
 def test_symbols_are_distinct_non_empty_and_deterministically_sorted(tmp_path) -> None:

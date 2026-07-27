@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.features.candles.window import (
     CANDLE_WINDOW_LIMIT,
-    SUPPORTED_TIMEFRAME,
+    DEFAULT_TIMEFRAME,
     CandleWindowService,
     DatabaseUnavailable,
     DuckDbCandleRepository,
@@ -96,14 +96,17 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     ) -> Response:
         started_at = perf_counter()
         response = await call_next(request)
-        if request.url.path in {"/candles", "/symbols"}:
+        if request.url.path in {"/candles", "/symbols", "/timeframes"}:
+            path_event = {
+                "/candles": "candle_request",
+                "/symbols": "symbol_catalog_request",
+                "/timeframes": "timeframes_request",
+            }
             logger.info(
                 json.dumps(
                     {
                         "duration_ms": round((perf_counter() - started_at) * 1000, 2),
-                        "event": "symbol_catalog_request"
-                        if request.url.path == "/symbols"
-                        else "candle_request",
+                        "event": path_event[request.url.path],
                         "status_code": response.status_code,
                     },
                     sort_keys=True,
@@ -232,13 +235,20 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     )
     def candles(
         symbol: str | None = None,
-        timeframe: str = SUPPORTED_TIMEFRAME,
+        timeframe: str = DEFAULT_TIMEFRAME,
         cursor: str | None = None,
         limit: int = CANDLE_WINDOW_LIMIT,
     ) -> dict[str, object]:
         return candle_service.get_window(
             symbol=symbol, timeframe=timeframe, cursor=cursor, limit=limit
         )
+
+    @app.get(
+        "/timeframes",
+        tags=["candles"],
+    )
+    def timeframes() -> list[str]:
+        return candle_service.list_timeframes()
 
     return app
 
