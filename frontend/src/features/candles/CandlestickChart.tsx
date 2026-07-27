@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import type { components } from "../../api/generated";
 import { useCandleWindow } from "./useCandleWindow";
 
-const TIMEFRAME = "1m";
-
 type Candle = components["schemas"]["Candle"];
 
 function chronologicalUniqueCandles(candles: Candle[]): Candle[] {
@@ -27,9 +25,10 @@ function asChartData(candles: Candle[]): CandlestickData<Time>[] {
 interface ChartCanvasProps {
   candles: Candle[];
   symbol: string;
+  timeframe: string;
 }
 
-function ChartCanvas({ candles, symbol }: ChartCanvasProps) {
+function ChartCanvas({ candles, symbol, timeframe }: ChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -58,7 +57,7 @@ function ChartCanvas({ candles, symbol }: ChartCanvasProps) {
 
   return (
     <div
-      aria-label={`${symbol} one-minute candlestick chart`}
+      aria-label={`${symbol} ${timeframe} candlestick chart`}
       className="chart-canvas"
       data-candle-datetimes={chronologicalUniqueCandles(candles).map((candle) => candle.datetime).join(",")}
       data-testid="chart-history"
@@ -69,11 +68,12 @@ function ChartCanvas({ candles, symbol }: ChartCanvasProps) {
 
 interface CandlestickChartProps {
   symbol: string;
+  timeframe: string;
 }
 
-export function CandlestickChart({ symbol }: CandlestickChartProps) {
+export function CandlestickChart({ symbol, timeframe }: CandlestickChartProps) {
   const [requestedOlderWindow, setRequestedOlderWindow] = useState(false);
-  const windowQuery = useCandleWindow({ symbol, timeframe: TIMEFRAME });
+  const windowQuery = useCandleWindow({ symbol, timeframe });
   const candles = chronologicalUniqueCandles(windowQuery.data?.pages.flatMap((page) => page.candles) ?? []);
 
   useEffect(() => {
@@ -81,7 +81,7 @@ export function CandlestickChart({ symbol }: CandlestickChartProps) {
   }, [symbol]);
 
   if (windowQuery.isPending) {
-    return <p role="status">Loading {symbol} candles…</p>;
+    return <p role="status">Loading {symbol} {timeframe} candles…</p>;
   }
   if (windowQuery.isError && candles.length === 0) {
     return (
@@ -94,7 +94,7 @@ export function CandlestickChart({ symbol }: CandlestickChartProps) {
     );
   }
   if (candles.length === 0) {
-    return <p role="status">No {symbol} 1m candles are available.</p>;
+    return <p role="status">No {symbol} {timeframe} candles are available.</p>;
   }
 
   return (
@@ -102,7 +102,7 @@ export function CandlestickChart({ symbol }: CandlestickChartProps) {
       <div className="chart-toolbar">
         <div>
           <p className="eyebrow">Bounded window</p>
-          <h2 id="chart-title">{symbol} · 1m</h2>
+          <h2 id="chart-title">{symbol} · {timeframe}</h2>
         </div>
         <button
           disabled={!windowQuery.hasNextPage || windowQuery.isFetchingNextPage}
@@ -124,7 +124,7 @@ export function CandlestickChart({ symbol }: CandlestickChartProps) {
           </button>
         </div>
       )}
-      <ChartCanvas candles={candles} symbol={symbol} />
+      <ChartCanvas candles={candles} symbol={symbol} timeframe={timeframe} />
     </section>
   );
 }

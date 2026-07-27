@@ -2,11 +2,15 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { CandlestickChart } from "./features/candles/CandlestickChart";
 import { SymbolSelector } from "./features/candles/SymbolSelector";
+import { TimeframeSelector } from "./features/candles/TimeframeSelector";
 import { useSymbols } from "./features/candles/useSymbols";
+import { useTimeframes } from "./features/candles/useTimeframes";
 
 export function App() {
   const symbolsQuery = useSymbols();
+  const timeframesQuery = useTimeframes();
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>("1m");
   const symbols = symbolsQuery.data?.symbols;
 
   useEffect(() => {
@@ -35,7 +39,12 @@ export function App() {
     content = (
       <>
         <SymbolSelector onSelect={setSelectedSymbol} selectedSymbol={selectedSymbol} symbols={symbols} />
-        <CandlestickChart symbol={selectedSymbol} />
+        <TimeframeSelector
+          onSelect={setSelectedTimeframe}
+          selectedTimeframe={selectedTimeframe}
+          timeframes={timeframesQuery.data ?? ["1m", "5m", "15m", "1h"]}
+        />
+        <CandlestickChart symbol={selectedSymbol} timeframe={selectedTimeframe} />
       </>
     );
   }
@@ -47,7 +56,7 @@ export function App() {
           <p className="eyebrow">Market data</p>
           <h1>Trading Terminal</h1>
         </div>
-        <p aria-label="Market scope">Selected symbol · 1m</p>
+        <p aria-label="Market scope">Selected symbol · {selectedTimeframe}</p>
       </header>
       {content}
     </main>
