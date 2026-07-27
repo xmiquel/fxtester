@@ -1,26 +1,6 @@
-# terminal-foundation Specification
+# Delta for terminal-foundation
 
-## Purpose
-
-Define the first-slice terminal foundation for a single-trader workspace backed by a concrete read-only DuckDB source.
-
-## Requirements
-
-### Requirement: Read-only DuckDB market source
-
-The system MUST use `D:\repos_2026\98-tstlocal\data\market.duckdb` as the concrete source database, query `dt_ohlc_m1` for the initial `NDX` slice, and preserve source column fidelity for `datetime`, `symbol`, `OPEN`, `high`, `low`, quoted `close`, `tickvol`, `volume`, `spread`, `origen`, and `fecha_carga`. The backend/container MUST NOT mutate the source database.
-
-#### Scenario: Load the initial NDX window
-
-- GIVEN the host DuckDB file is mounted read-only
-- WHEN the backend requests the initial `NDX` candles from `dt_ohlc_m1`
-- THEN the response uses the source columns without renaming or mutation
-
-#### Scenario: Source mutation is attempted
-
-- GIVEN a write path is triggered against the market database
-- WHEN the backend evaluates the request
-- THEN no mutation is applied and the source file remains unchanged
+## MODIFIED Requirements
 
 ### Requirement: Multi-timeframe bounded candle slice
 
@@ -65,7 +45,7 @@ The system MUST support timeframes "1m", "5m", "15m", and "1h" via on-the-fly Du
 
 ### Requirement: No non-analysis product paths
 
-The system MUST NOT expose real MT5 or CSV ingestion, source writes, broker/order paths, auth, live-feed controls, watchlists, or live-feed controls in this slice.
+The system MUST NOT expose real MT5 or CSV ingestion, source writes, broker/order paths, auth, live-feed controls, or watchlists in this slice.
 (Previously: included timeframe selector in the prohibition list)
 
 #### Scenario: Execution or auth is sought
@@ -79,6 +59,15 @@ The system MUST NOT expose real MT5 or CSV ingestion, source writes, broker/orde
 - GIVEN a user looks for MT5 or CSV ingestion
 - WHEN the terminal renders
 - THEN those paths are not present
+
+## REMOVED Requirements
+
+### Requirement: 1m-only bounded candle slice
+
+(Reason: Replaced by multi-timeframe bounded candle slice above — the 1m restriction is removed in favor of four supported timeframes via date_bin aggregation.)
+(Migration: The "A later timeframe is considered" scenario is no longer needed; timeframe selection is now a first-class capability, not a future concern.)
+
+## ADDED Requirements
 
 ### Requirement: Expose available timeframes via API
 

@@ -1,14 +1,6 @@
-# candlestick-terminal Specification
+# Delta for candlestick-terminal
 
-## Purpose
-
-Define how the terminal renders and pages `1m` candlesticks from bounded backend windows in the first slice.
-
-## Delivery Status
-
-Historical delivery note corrected after PR 2 review remediation: PR 1 delivered the bounded backend candle-window API and PR 2 delivered chart rendering and browser-driven history paging. The requirements below describe the delivered terminal behavior.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Render candle windows at any supported timeframe
 
