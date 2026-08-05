@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, type CandlestickData, type Time } from "lightweight-charts";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 
 import type { components } from "../../api/generated";
 import { useCandleWindow } from "./useCandleWindow";
@@ -32,9 +32,45 @@ interface ChartCanvasProps {
 }
 
 const VISIBLE_RANGE_NEAR_START_THRESHOLD = 3;
+const CHART_DRAG_DISTANCE_PX = 5;
+
+interface PointerDragStart {
+  id: number;
+  x: number;
+}
 
 function ChartCanvas({ candles, hasMore, isLoading, onReachStart, symbol, timeframe }: ChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const pointerStartXRef = useRef<PointerDragStart | null>(null);
+  const hasUserNavigatedRef = useRef(false);
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    pointerStartXRef.current = { id: event.pointerId, x: event.clientX };
+  };
+
+  const resetPointerStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointerStartXRef.current?.id === event.pointerId) {
+      pointerStartXRef.current = null;
+    }
+  };
+
+  const handlePointerLeave = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    resetPointerStart(event);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pointerStart = pointerStartXRef.current;
+    if (
+      pointerStart !== null &&
+      pointerStart.id === event.pointerId &&
+      Math.abs(event.clientX - pointerStart.x) >= CHART_DRAG_DISTANCE_PX
+    ) {
+      hasUserNavigatedRef.current = true;
+    }
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -53,7 +89,8 @@ function ChartCanvas({ candles, hasMore, isLoading, onReachStart, symbol, timefr
     chart.timeScale().fitContent();
 
     const handleVisibleRange = (range: { from: number; to: number } | null) => {
-      if (range && range.from <= VISIBLE_RANGE_NEAR_START_THRESHOLD && hasMore && !isLoading) {
+      if (range && hasUserNavigatedRef.current && range.from <= VISIBLE_RANGE_NEAR_START_THRESHOLD && hasMore && !isLoading) {
+        hasUserNavigatedRef.current = false;
         onReachStart();
       }
     };
@@ -74,6 +111,11 @@ function ChartCanvas({ candles, hasMore, isLoading, onReachStart, symbol, timefr
       className="chart-canvas"
       data-candle-datetimes={chronologicalUniqueCandles(candles).map((candle) => candle.datetime).join(",")}
       data-testid="chart-history"
+      onPointerCancelCapture={resetPointerStart}
+      onPointerDownCapture={handlePointerDown}
+      onPointerLeaveCapture={handlePointerLeave}
+      onPointerMoveCapture={handlePointerMove}
+      onPointerUpCapture={resetPointerStart}
       ref={containerRef}
     />
   );
