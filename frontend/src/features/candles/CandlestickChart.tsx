@@ -55,7 +55,7 @@ function ChartCanvas({ candles, hasMore, isLoading, onReachStart, symbol, timefr
   };
 
   const handlePointerLeave = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
       return;
     }
     resetPointerStart(event);
@@ -113,7 +113,7 @@ function ChartCanvas({ candles, hasMore, isLoading, onReachStart, symbol, timefr
       data-testid="chart-history"
       onPointerCancelCapture={resetPointerStart}
       onPointerDownCapture={handlePointerDown}
-      onPointerLeaveCapture={handlePointerLeave}
+      onPointerLeave={handlePointerLeave}
       onPointerMoveCapture={handlePointerMove}
       onPointerUpCapture={resetPointerStart}
       ref={containerRef}

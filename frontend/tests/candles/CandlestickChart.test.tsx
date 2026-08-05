@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { expect, test, vi } from "vitest";
 
@@ -13,6 +13,12 @@ function navigateChartToStart() {
   const chart = screen.getByTestId("chart-history");
   fireEvent.pointerDown(chart, { clientX: 0, pointerId: 1, pointerType: "mouse" });
   fireEvent.pointerMove(chart, { clientX: 10, pointerId: 1, pointerType: "mouse" });
+}
+
+function leaveChart(chart: HTMLElement, relatedTarget: EventTarget | null) {
+  const event = createEvent.pointerOut(chart, { clientX: 0, pointerId: 1, pointerType: "mouse" });
+  Object.defineProperty(event, "relatedTarget", { value: relatedTarget });
+  fireEvent(chart, event);
 }
 
 vi.mock("lightweight-charts", () => ({
@@ -191,6 +197,70 @@ test("does not load history after a click is released before a passive range cal
   rangeHandlers.at(-1)?.({ from: 0, to: 10 });
 
   expect(requests).toBe(1);
+});
+
+test("does not load history after an external pointer leave cancels an in-progress drag", async () => {
+  let requests = 0;
+  rangeHandlers.length = 0;
+  server.use(
+    http.get("*/api/candles", () => {
+      requests += 1;
+      return HttpResponse.json({
+        candles: [candle],
+        has_more: true,
+        next_cursor: "2025-01-01T00:02:00",
+        symbol: "NDX",
+        timeframe: "1m",
+      });
+    }),
+  );
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <CandlestickChart symbol="NDX" timeframe="1m" />
+    </QueryClientProvider>,
+  );
+
+  const chart = await screen.findByTestId("chart-history");
+  fireEvent.pointerDown(chart, { clientX: 0, pointerId: 1, pointerType: "mouse" });
+  leaveChart(chart, document.body);
+  fireEvent.pointerMove(chart, { clientX: 10, pointerId: 1, pointerType: "mouse" });
+  rangeHandlers.at(-1)?.({ from: 0, to: 10 });
+
+  expect(requests).toBe(1);
+});
+
+test("keeps an in-progress drag when the pointer moves to a contained related target", async () => {
+  let requests = 0;
+  rangeHandlers.length = 0;
+  server.use(
+    http.get("*/api/candles", () => {
+      requests += 1;
+      return HttpResponse.json({
+        candles: [candle],
+        has_more: requests === 1,
+        next_cursor: requests === 1 ? "2025-01-01T00:02:00" : null,
+        symbol: "NDX",
+        timeframe: "1m",
+      });
+    }),
+  );
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <CandlestickChart symbol="NDX" timeframe="1m" />
+    </QueryClientProvider>,
+  );
+
+  const chart = await screen.findByTestId("chart-history");
+  const relatedTarget = document.createElement("span");
+  chart.append(relatedTarget);
+  fireEvent.pointerDown(chart, { clientX: 0, pointerId: 1, pointerType: "mouse" });
+  leaveChart(chart, relatedTarget);
+  fireEvent.pointerMove(chart, { clientX: 10, pointerId: 1, pointerType: "mouse" });
+  rangeHandlers.at(-1)?.({ from: 0, to: 10 });
+
+  await expect.poll(() => requests).toBe(2);
 });
 
 test("loads history after a mouse pointer drag reaches the start", async () => {
