@@ -73,6 +73,30 @@ test("renders one bounded window and requests older history only after navigatio
   await expect(page.getByTestId("chart-history")).toHaveAttribute("data-candle-datetimes", /2025-01-01T00:00:00/);
 });
 
+test("shows and clears the candle data window as the crosshair enters and leaves a candle", async ({ page }) => {
+  await page.route("**/api/candles?**", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(initialWindow) }),
+  );
+
+  await page.goto("/");
+  const chart = page.getByRole("region", { name: "NDX 1m candlestick chart" });
+  await expect(chart).toBeVisible();
+  const box = await chart.boundingBox();
+  if (!box) throw new Error("Chart canvas not found");
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const dataWindow = page.getByRole("complementary", { name: "Candle data window" });
+  await expect(dataWindow).toContainText("Timestamp");
+  await expect(dataWindow).toContainText("Open");
+  await expect(dataWindow).toContainText("High");
+  await expect(dataWindow).toContainText("Low");
+  await expect(dataWindow).toContainText("Close");
+  await expect(dataWindow).toContainText("Volume");
+
+  await page.mouse.move(box.x - 10, box.y + box.height / 2);
+  await expect(dataWindow).toContainText("No candle selected.");
+});
+
 test("selects a catalog symbol and resets candle requests to that symbol", async ({ page }) => {
   const requests: string[] = [];
   await page.route("**/api/candles?**", async (route) => {

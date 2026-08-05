@@ -1,13 +1,28 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { createChart } from "lightweight-charts";
 import { http, HttpResponse } from "msw";
 import { expect, test, vi } from "vitest";
 
 import { CandlestickChart } from "../../src/features/candles/CandlestickChart";
 import { server } from "../mocks/server";
 
-const chartInstances = vi.hoisted((): Array<{ remove: ReturnType<typeof vi.fn>; setData: ReturnType<typeof vi.fn> }> => []);
+interface CrosshairMoveParam {
+  point?: { x: number; y: number };
+  seriesData: Map<unknown, unknown>;
+  time?: number;
+}
+
+interface ChartInstance {
+  remove: ReturnType<typeof vi.fn>;
+  setData: ReturnType<typeof vi.fn>;
+  unsubscribeCrosshairMove: ReturnType<typeof vi.fn>;
+}
+
+const chartInstances = vi.hoisted((): ChartInstance[] => []);
 const rangeHandlers = vi.hoisted((): Array<(range: { from: number; to: number } | null) => void> => []);
+const crosshairHandlers = vi.hoisted((): Array<(param: CrosshairMoveParam) => void> => []);
+const candleSeriesInstances = vi.hoisted((): object[] => []);
 
 function navigateChartToStart() {
   const chart = screen.getByTestId("chart-history");
@@ -25,12 +40,16 @@ vi.mock("lightweight-charts", () => ({
   CandlestickSeries: {},
   ColorType: { Solid: "solid" },
   createChart: vi.fn(() => {
-    const instance = { remove: vi.fn(), setData: vi.fn() };
+    const instance = { remove: vi.fn(), setData: vi.fn(), unsubscribeCrosshairMove: vi.fn() };
+    const series = { setData: instance.setData };
     chartInstances.push(instance);
+    candleSeriesInstances.push(series);
     return {
-      addSeries: () => ({ setData: instance.setData }),
+      addSeries: () => series,
       applyOptions: vi.fn(),
       remove: instance.remove,
+      subscribeCrosshairMove: vi.fn((handler) => { crosshairHandlers.push(handler); }),
+      unsubscribeCrosshairMove: instance.unsubscribeCrosshairMove,
       timeScale: () => ({
         fitContent: vi.fn(),
         subscribeVisibleLogicalRangeChange: vi.fn((handler) => { rangeHandlers.push(handler); }),
@@ -115,6 +134,114 @@ test("renders chronological, duplicate-free candles from adjacent cursor windows
       expect.objectContaining({ close: 103, high: 105, low: 99, open: 100, time: expect.any(Number) }),
     ),
   );
+});
+
+test("shows the hovered candle OHLC data window and clears it outside the chart or without candle data", async () => {
+  chartInstances.length = 0;
+  crosshairHandlers.length = 0;
+  candleSeriesInstances.length = 0;
+  server.use(
+    http.get("*/api/candles", () =>
+      HttpResponse.json({ candles: [candle], has_more: false, next_cursor: null, symbol: "NDX", timeframe: "1m" }),
+    ),
+  );
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <CandlestickChart symbol="NDX" timeframe="1m" />
+    </QueryClientProvider>,
+  );
+
+  await screen.findByTestId("chart-history");
+  const chartTime = Math.floor(Date.UTC(2025, 0, 1, 0, 3, 0) / 1000);
+  expect(chartInstances.at(-1)?.setData).toHaveBeenCalledWith([
+    expect.objectContaining({ time: chartTime }),
+  ]);
+  act(() => {
+    crosshairHandlers.at(-1)?.({
+      point: { x: 10, y: 10 },
+      seriesData: new Map([[candleSeriesInstances.at(-1), { close: 103, high: 105, low: 99, open: 100 }]]),
+      time: chartTime,
+    });
+  });
+
+  const dataWindow = await screen.findByRole("complementary", { name: "Candle data window" });
+  expect(dataWindow).toHaveTextContent("Timestamp (UTC)2025-01-01T00:03:00");
+  expect(dataWindow).toHaveTextContent("Open100");
+  expect(dataWindow).toHaveTextContent("High105");
+  expect(dataWindow).toHaveTextContent("Low99");
+  expect(dataWindow).toHaveTextContent("Close103");
+  expect(dataWindow).toHaveTextContent("Volume1");
+  expect(createChart).toHaveBeenLastCalledWith(
+    expect.any(HTMLDivElement),
+    expect.objectContaining({ timeScale: { secondsVisible: false, timeVisible: true } }),
+  );
+
+  act(() => {
+    crosshairHandlers.at(-1)?.({ point: undefined, seriesData: new Map(), time: undefined });
+  });
+  expect(dataWindow).toHaveTextContent("No candle selected.");
+
+  act(() => {
+    crosshairHandlers.at(-1)?.({ point: { x: 10, y: 10 }, seriesData: new Map(), time: chartTime });
+  });
+  expect(dataWindow).toHaveTextContent("No candle selected.");
+
+  act(() => {
+    crosshairHandlers.at(-1)?.({
+      point: { x: 10, y: 10 },
+      seriesData: new Map([[candleSeriesInstances.at(-1), { close: 103, high: 105, low: 99, open: 100 }]]),
+      time: chartTime,
+    });
+  });
+  expect(dataWindow).toHaveTextContent("Timestamp (UTC)2025-01-01T00:03:00");
+
+  act(() => {
+    crosshairHandlers.at(-1)?.({
+      point: { x: -1, y: 10 },
+      seriesData: new Map([[candleSeriesInstances.at(-1), { close: 103, high: 105, low: 99, open: 100 }]]),
+      time: chartTime,
+    });
+  });
+  expect(dataWindow).toHaveTextContent("No candle selected.");
+});
+
+test("selects candles from the keyboard and exposes instructions and live readout", async () => {
+  server.use(
+    http.get("*/api/candles", () =>
+      HttpResponse.json({
+        candles: [
+          { ...candle, datetime: "2025-01-01T00:02:00", fecha_carga: "2025-01-01T00:02:00" },
+          candle,
+        ],
+        has_more: false,
+        next_cursor: null,
+        symbol: "NDX",
+        timeframe: "1m",
+      }),
+    ),
+  );
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <CandlestickChart symbol="NDX" timeframe="1m" />
+    </QueryClientProvider>,
+  );
+
+  const chart = await screen.findByRole("region", { name: "NDX 1m candlestick chart" });
+  const dataWindow = screen.getByRole("complementary", { name: "Candle data window" });
+  expect(chart).toHaveAttribute("tabindex", "0");
+  expect(chart).toHaveAccessibleDescription(
+    "Use Left and Right Arrow keys to select candles. Press Home for the first candle or End for the last candle. Pointer hover also inspects candles. No candle selected.",
+  );
+
+  chart.focus();
+  fireEvent.keyDown(chart, { key: "End" });
+  expect(dataWindow).toHaveTextContent("Timestamp (UTC)2025-01-01T00:03:00");
+  fireEvent.keyDown(chart, { key: "Home" });
+  expect(dataWindow).toHaveTextContent("Timestamp (UTC)2025-01-01T00:02:00");
+  fireEvent.keyDown(chart, { key: "ArrowRight" });
+  expect(dataWindow).toHaveTextContent("Timestamp (UTC)2025-01-01T00:03:00");
 });
 
 test("loads history only after navigation reaches the start after initial and recreated range delivery", async () => {
@@ -326,8 +453,10 @@ test("loads history after a touch pointer drag reaches the start", async () => {
   await expect.poll(() => requests).toBe(2);
 });
 
-test("the production candle hook evicts the oldest window after three older pages", async () => {
+test("chart recreation clears hovered data when bounded paging evicts its candle", async () => {
   rangeHandlers.length = 0;
+  crosshairHandlers.length = 0;
+  candleSeriesInstances.length = 0;
   server.use(
     http.get("*/api/candles", ({ request }) => {
       const cursor = new URL(request.url).searchParams.get("cursor");
@@ -357,6 +486,16 @@ test("the production candle hook evicts the oldest window after three older page
   const getHandler = () => rangeHandlers[rangeHandlers.length - 1];
 
   await screen.findByTestId("chart-history");
+  act(() => {
+    crosshairHandlers.at(-1)?.({
+      point: { x: 10, y: 10 },
+      seriesData: new Map([[candleSeriesInstances.at(-1), { close: 103, high: 105, low: 99, open: 100 }]]),
+      time: Math.floor(Date.UTC(2025, 0, 1, 0, 4, 0) / 1000),
+    });
+  });
+  expect(await screen.findByRole("complementary", { name: "Candle data window" })).toHaveTextContent(
+    "Timestamp (UTC)2025-01-01T00:04:00",
+  );
   navigateChartToStart();
   getHandler()?.({ from: 0, to: 10 });
   await expect(screen.findByTestId("chart-history")).resolves.toHaveAttribute(
@@ -375,6 +514,7 @@ test("the production candle hook evicts the oldest window after three older page
     "data-candle-datetimes",
     "2025-01-01T00:01:00,2025-01-01T00:02:00,2025-01-01T00:03:00",
   );
+  expect(screen.getByRole("complementary", { name: "Candle data window" })).toHaveTextContent("No candle selected.");
 });
 
 test("retries an initial candle request failure on demand", async () => {
@@ -489,4 +629,5 @@ test("removes the active chart instance when the chart unmounts", async () => {
 
   expect(chartInstances).toHaveLength(1);
   expect(chartInstances[0].remove).toHaveBeenCalledOnce();
+  expect(chartInstances[0].unsubscribeCrosshairMove).toHaveBeenCalledOnce();
 });

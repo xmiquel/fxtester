@@ -9,4 +9,12 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .eyebrow { color: #8da1bd; font-size: 0.75rem; letter-spacing: 0.08em; margin: 0; text-transform: uppercase; }
 h1, h2 { margin: 0.25rem 0 1rem; }
 .chart-panel { background: #101827; border: 1px solid #223047; border-radius: 10px; padding: 1rem; }
+.chart-content { position: relative; }
 .chart-canvas { min-height: 440px; width: 100%; }
+.chart-canvas:focus-visible { outline: 2px solid #60a5fa; outline-offset: 3px; }
+.data-window { background: #17243a; border: 1px solid #355071; border-radius: 6px; color: #e8eef8; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; }
+.data-window dl { display: grid; gap: 0.25rem 1rem; grid-template-columns: repeat(2, max-content); margin: 0; }
+.data-window-row { display: contents; }
+.data-window dt { color: #8da1bd; }
+.data-window dd { margin: 0; }
+.visually-hidden { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; clip: rect(0, 0, 0, 0); }
