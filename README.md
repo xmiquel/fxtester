@@ -9,7 +9,7 @@ This workspace contains the bounded, read-only trading terminal foundation and i
    `docker compose up --build`.
 3. Verify `curl http://localhost:8000/ready` returns `{"status":"ready"}`.
 4. Open `http://localhost:5173`. The terminal fetches `/symbols`, selects the deterministic first
-   symbol, and lets you select any discovered symbol for its `1m` chart. Empty and unavailable
+   symbol, and lets you select any discovered symbol and timeframe (`1m`, `5m`, `15m`, or `1h`) for its chart. Empty and unavailable
    catalogs render accessible states without a candle request. Use **Load older candles** only when
    you want the next bounded history window.
 
@@ -23,7 +23,7 @@ inspect the backend logs before changing the mount.
 - The source is mounted at `/data/market.duckdb` as a read-only bind mount.
 - The API reads `dt_ohlc_m1` and returns source column names unchanged, including `OPEN` and `close`.
 - Requests are filtered, ordered, and limited in DuckDB; each response contains at most 200 candles.
-- This slice exposes discovered-symbol `1m` analysis data. It has no ingestion, writes, orders, auth, live feed, or timeframe selector.
+- This slice exposes discovered-symbol analysis data at `1m`, `5m`, `15m`, and `1h`. It has no ingestion, writes, orders, auth, or live feed.
 - The source bind mount is immutable. Backend tests use isolated temporary DuckDB files and never
   the mounted source.
 
@@ -41,9 +41,9 @@ inspect the backend logs before changing the mount.
 
 ## Frontend boundary
 
-- The terminal offers a selector for the deterministic, read-only `/symbols` catalog and keys each
-  bounded candle window by the selected symbol. It has no timeframe selector, orders,
-  authentication, or aggregation UI.
+- The terminal offers selectors for the deterministic, read-only `/symbols` catalog and the
+  supported `1m`, `5m`, `15m`, and `1h` timeframes. It keys each bounded candle window by the
+  selected symbol and timeframe. It has no orders or authentication UI.
 - The generated TypeScript candle contract is in `frontend/src/api/generated.ts`. Regenerate it
   after exporting `backend/openapi.json` with `npm run generate:api --prefix frontend`.
 - TanStack Query caches cursor windows by symbol, timeframe, cursor, and limit. It retains at most

@@ -15,7 +15,7 @@
 3. Confirm `curl http://localhost:8000/ready` returns HTTP 200 and `{"status":"ready"}`.
    Then fetch `curl http://localhost:8000/symbols`. `{"symbols":[]}` is healthy: do not probe
    candles when no symbol is available. Select a returned symbol in the browser, or use it in
-   `curl "http://localhost:5173/api/candles?symbol=<symbol>"`.
+    `curl "http://localhost:5173/api/candles?symbol=<symbol>&timeframe=5m"`.
    Confirm HTTP 200 with `OPEN`, `high`, `low`, and `close` through the frontend proxy. Run the
    Compose browser check below to prove React executes and renders that API response. Inspect
    backend logs for
@@ -53,7 +53,7 @@ containers and the network only.
 | `/health` or `/ready` returns 503 | Backend logs and DuckDB readability | Restore the file or mount a readable copy; do not make it writable |
 | `/symbols` returns 503 | `symbol_catalog_request` and database-unavailable logs | Restore the readable source, verify `/ready`, then retry catalog discovery |
 | `/symbols` returns `{"symbols":[]}` | Confirm the source table has usable non-blank symbols | This is a valid empty catalog, not a database outage; do not fabricate a fallback symbol |
-| `/candles` returns 400 | Request includes a valid `symbol` from `/symbols` and `timeframe=1m` | Supply a discovered symbol. Only an omitted symbol resolves to freshly discovered `NDX`; explicit `symbol=`, unsupported symbols, and non-`1m` timeframes are rejected |
+| `/candles` returns 400 | Request includes a valid `symbol` from `/symbols` and a supported timeframe (`1m`, `5m`, `15m`, or `1h`) | Supply a discovered symbol. Only an omitted symbol resolves to freshly discovered `NDX`; empty explicit symbols, unsupported symbols, and unsupported timeframes are rejected |
 | `/candles` returns 503 | Same database availability check | Fix the source and verify readiness before retrying |
 
 The API writes structured JSON events through Uvicorn's container logger. `/health` emits
@@ -163,8 +163,8 @@ catalog in an accessible selector. A valid empty catalog shows an accessible no-
 catalog failure shows an accessible retryable error; neither state requests candles. Changing the
 selection uses an isolated symbol-keyed cursor cache. Once the chart is active, it requests an older
 cursor window only when the operator selects **Load older candles**; TanStack Query retains at most
-three bounded pages and does not materialize full history. Future timeframe aggregation remains in
-DuckDB, not the browser.
+    three bounded pages and does not materialize full history. Timeframe aggregation remains in
+    DuckDB, not the browser, for the supported `1m`, `5m`, `15m`, and `1h` intervals.
 
 Run the matching frontend gates before release:
 

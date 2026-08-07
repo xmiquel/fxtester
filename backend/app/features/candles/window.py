@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Protocol
 
@@ -19,6 +19,7 @@ TIMEFRAME_BUCKET_SECONDS: dict[str, int] = {
     "15m": 900,
     "1h": 3600,
 }
+EPOCH = datetime(1970, 1, 1)
 SOURCE_TABLE = "dt_ohlc_m1"
 CANDLE_WINDOW_LIMIT = 200
 OMITTED_SYMBOL_COMPATIBILITY_DEFAULT = "NDX"
@@ -103,6 +104,18 @@ class UnsupportedTimeframeError(ValueError):
         super().__init__(f"Unsupported timeframe '{timeframe}'. Supported: {supported}")
 
 
+def normalize_cursor_to_bucket(cursor: datetime, timeframe: str) -> datetime:
+    """Return the inclusive bucket start used as an aggregate cursor boundary."""
+    if timeframe == "1m":
+        return cursor
+
+    if cursor.tzinfo is not None:
+        cursor = cursor.astimezone(timezone.utc).replace(tzinfo=None)
+
+    bucket = timedelta(seconds=TIMEFRAME_BUCKET_SECONDS[timeframe])
+    return EPOCH + ((cursor - EPOCH) // bucket) * bucket
+
+
 class CandleRepository(Protocol):
     def check_available(self) -> None: ...
 
@@ -146,6 +159,10 @@ class DuckDbCandleRepository:
                         parameters.append(cursor)
                 else:
                     bucket_seconds = TIMEFRAME_BUCKET_SECONDS[timeframe]
+                    bucket_expression = f"""TIMESTAMP 'epoch' + (
+                            CAST(FLOOR(EXTRACT(epoch FROM datetime)) AS BIGINT)
+                            // {bucket_seconds} * {bucket_seconds}
+                          ) * INTERVAL '1 second'"""
                     parameters = [symbol]
                     where_clause = "WHERE symbol = ?"
                     if cursor is not None:
@@ -153,10 +170,7 @@ class DuckDbCandleRepository:
                         parameters.append(cursor)
                     query = f"""
                         SELECT
-                          TIMESTAMP 'epoch' + (
-                            CAST(EXTRACT(epoch FROM datetime) AS BIGINT)
-                            // {bucket_seconds} * {bucket_seconds}
-                          ) * INTERVAL '1 second' AS datetime,
+                          {bucket_expression} AS datetime,
                           symbol,
                           FIRST("OPEN" ORDER BY datetime) AS open,
                           MAX(high) AS high, MIN(low) AS low,
@@ -167,8 +181,8 @@ class DuckDbCandleRepository:
                           MAX(fecha_carga) AS fecha_carga
                         FROM {SOURCE_TABLE}
                         {where_clause}
-                        GROUP BY datetime, symbol
-                        ORDER BY datetime DESC
+                        GROUP BY {bucket_expression}, symbol
+                        ORDER BY {bucket_expression} DESC
                         LIMIT ?
                     """  # noqa: S608 - identifiers are module constants
                 parameters.append(limit + 1)
@@ -229,6 +243,7 @@ class CandleWindowService:
                 parsed_cursor = datetime.fromisoformat(cursor)
             except ValueError as error:
                 raise HTTPException(status_code=422, detail="cursor must be ISO-8601") from error
+            parsed_cursor = normalize_cursor_to_bucket(parsed_cursor, timeframe)
         catalog = self.repository.list_symbols()
         effective_symbol = OMITTED_SYMBOL_COMPATIBILITY_DEFAULT if symbol is None else symbol
         if effective_symbol not in catalog:

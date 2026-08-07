@@ -136,6 +136,31 @@ test("renders chronological, duplicate-free candles from adjacent cursor windows
   );
 });
 
+test("surfaces a duplicate timestamp returned within the initial backend page", async () => {
+  server.use(
+    http.get("*/api/candles", () =>
+      HttpResponse.json({
+        candles: [candle, { ...candle, close: 999 }],
+        has_more: false,
+        next_cursor: null,
+        symbol: "NDX",
+        timeframe: "1m",
+      }),
+    ),
+  );
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <CandlestickChart symbol="NDX" timeframe="1m" />
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Candle response contains duplicate timestamp: 2025-01-01T00:03:00",
+  );
+  expect(screen.queryByRole("region", { name: "NDX 1m candlestick chart" })).not.toBeInTheDocument();
+});
+
 test("shows the hovered candle OHLC data window and clears it outside the chart or without candle data", async () => {
   chartInstances.length = 0;
   crosshairHandlers.length = 0;
