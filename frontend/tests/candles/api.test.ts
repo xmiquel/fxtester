@@ -23,6 +23,34 @@ test("forwards the query AbortSignal to fetch", async () => {
   fetchMock.mockRestore();
 });
 
+test("rejects a duplicate timestamp within one candle response", async () => {
+  const controller = new AbortController();
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        symbol: "NDX",
+        timeframe: "5m",
+        candles: [
+          { datetime: "2025-01-01T00:00:00" },
+          { datetime: "2025-01-01T00:00:00" },
+        ],
+        next_cursor: null,
+        has_more: false,
+      }),
+      { status: 200 },
+    ),
+  );
+
+  await expect(
+    fetchCandleWindow({ symbol: "NDX", timeframe: "5m", cursor: null, limit: 200, signal: controller.signal }),
+  ).rejects.toThrow("Candle response contains duplicate timestamp: 2025-01-01T00:00:00");
+  expect(reportClientEvent).toHaveBeenCalledWith(
+    CLIENT_EVENT_KIND.API_FAILURE,
+    expect.objectContaining({ message: "Candle response contains duplicate timestamp: 2025-01-01T00:00:00" }),
+  );
+  fetchMock.mockRestore();
+});
+
 test("returns the symbol catalog and forwards the query AbortSignal", async () => {
   const controller = new AbortController();
   const catalog = { symbols: ["NDX", "SPX"] };

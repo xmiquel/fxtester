@@ -18,6 +18,19 @@ interface FetchSymbolsInput {
   signal: AbortSignal;
 }
 
+function assertUniqueCandleDatetimes(window: CandleWindow): CandleWindow {
+  const datetimes = new Set<string>();
+  for (const candle of window.candles) {
+    if (datetimes.has(candle.datetime)) {
+      const error = new Error(`Candle response contains duplicate timestamp: ${candle.datetime}`);
+      reportClientEvent(CLIENT_EVENT_KIND.API_FAILURE, error);
+      throw error;
+    }
+    datetimes.add(candle.datetime);
+  }
+  return window;
+}
+
 async function fetchApiJson<T>(path: string, signal: AbortSignal, unavailableMessage: string): Promise<T> {
   let response: Response;
   try {
@@ -61,5 +74,7 @@ export async function fetchCandleWindow({
     search.set("cursor", cursor);
   }
 
-  return fetchApiJson<CandleWindow>(`/candles?${search}`, signal, "Unable to load candles");
+  return assertUniqueCandleDatetimes(
+    await fetchApiJson<CandleWindow>(`/candles?${search}`, signal, "Unable to load candles"),
+  );
 }

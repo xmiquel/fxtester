@@ -24,14 +24,14 @@ The system MUST use `D:\repos_2026\98-tstlocal\data\market.duckdb` as the concre
 
 ### Requirement: Multi-timeframe bounded candle slice
 
-The system MUST support timeframes "1m", "5m", "15m", and "1h" via on-the-fly DuckDB `date_bin` aggregation on `dt_ohlc_m1`. The `/candles` endpoint MUST accept a `?timeframe=` query parameter. Each timeframe maps to a DuckDB interval: `'1 minute'`, `'5 minutes'`, `'15 minutes'`, `'1 hour'`. Default remains "1m". The API MUST filter, order, and limit each response to at most 200 candles. The 200-candle policy MAY increase later without architectural change.
+The system MUST support timeframes "1m", "5m", "15m", and "1h" via on-the-fly aggregation on `dt_ohlc_m1`. Non-"1m" aggregation MUST use epoch-aligned floor arithmetic equivalent to DuckDB `date_bin` with `TIMESTAMP 'epoch'` as the origin. The `/candles` endpoint MUST accept a `?timeframe=` query parameter. Each timeframe maps to a bucket interval of one minute, five minutes, 15 minutes, or one hour. Default remains "1m". The API MUST filter, order, and limit each response to at most 200 candles. The 200-candle policy MAY increase later without architectural change.
 (Previously: "1m" was the only supported timeframe, no timeframe parameter)
 
 #### Scenario: Request with a valid timeframe
 
 - GIVEN the `dt_ohlc_m1` source contains 1m OHLC data
 - WHEN a client requests `/candles?symbol=NDX&timeframe=5m`
-- THEN the backend applies `date_bin(INTERVAL '5 minutes', datetime, TIMESTAMP 'epoch')`
+- THEN the backend applies epoch-aligned floor arithmetic equivalent to `date_bin(INTERVAL '5 minutes', datetime, TIMESTAMP 'epoch')`
 - AND each returned candle groups exactly 5 minutes of source data
 - AND OHLC columns are reduced: first(open), max(high), min(low), last(close), sum(tickvol), sum(volume)
 - AND the response `timeframe` field equals "5m"
@@ -52,10 +52,15 @@ The system MUST support timeframes "1m", "5m", "15m", and "1h" via on-the-fly Du
 
 #### Scenario: Cursor alignment to bucket boundary
 
-- GIVEN a timeframe of "1h" and a cursor value is provided
-- WHEN the backend filters `WHERE datetime < ?`
-- THEN the cursor is treated as an exclusive upper bound applied BEFORE the `date_bin` grouping
-- AND the response `next_cursor` aligns to the last bucket boundary
+- GIVEN a non-"1m" timeframe and an arbitrary ISO-8601 cursor value is provided
+- WHEN the backend prepares the cursor for the source filter
+- THEN a timezone-aware cursor is normalized to UTC
+- AND the cursor is normalized down to the epoch-aligned bucket start for the requested timeframe
+- AND the exclusive source filter uses that normalized bucket start before aggregation, excluding that boundary bucket and preventing partial aggregate buckets
+- AND results are returned oldest-to-newest within each page while pagination moves backward from newest to older buckets
+- AND the response `next_cursor` identifies the start of the oldest returned bucket, while the next page uses it as an exclusive upper bound and does not repeat that bucket
+- GIVEN a "1m" timeframe and a cursor value is provided
+- THEN the existing 1m cursor semantics remain unchanged
 
 #### Scenario: Source mutation remains forbidden
 
