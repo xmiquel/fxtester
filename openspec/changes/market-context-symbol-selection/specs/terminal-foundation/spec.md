@@ -33,9 +33,9 @@ The system MUST use `D:\repos_2026\98-tstlocal\data\market.duckdb` as the concre
 - WHEN the backend evaluates the request
 - THEN no mutation is applied and the source file remains unchanged
 
-### Requirement: 1m-only bounded candle slice
+### Requirement: Retained cursor-paged candle windows
 
-The system MUST implement `1m` as the only timeframe. The API MUST filter, order, validate explicit symbols against the fresh discovered catalog, and limit each response to at most 200 candles. An omitted symbol MUST resolve to `NDX` only when fresh discovery contains `NDX`; otherwise it MUST return typed 400 or 503 according to the discovery result. (Previously: the API bounded the fixed `NDX` slice.)
+The system MUST filter, order, and validate explicit symbols against the fresh discovered catalog, and limit each response to at most 1000 candles for the selected timeframe. The frontend MUST request older pages only after pointer-gated navigation reaches the near edge, preserve the chart instance and visible logical range while older pages are prepended, and retain loaded pages up to 20,000 candles per active symbol/timeframe query without evicting pages below that cap. An omitted symbol MUST resolve to `NDX` only when fresh discovery contains `NDX`; otherwise it MUST return typed 400 or 503 according to the discovery result. (Previously: the API bounded the fixed `NDX` slice.)
 
 #### Scenario: Unsupported symbol is requested
 - GIVEN a requested symbol is absent from the current catalog
@@ -47,21 +47,27 @@ The system MUST implement `1m` as the only timeframe. The API MUST filter, order
 - WHEN the candle API resolves an omitted symbol
 - THEN it returns typed 400 or 503 respectively and never silently defaults
 
-#### Scenario: Request exceeds the current window cap
-- GIVEN a candle window larger than 200 rows is requested for a supported symbol
+#### Scenario: Request exceeds the current page cap
+- GIVEN a candle window larger than 1000 rows is requested for a supported symbol and timeframe
 - WHEN the API resolves the request
-- THEN the response contains no more than 200 candles
+- THEN the response contains no more than 1000 candles
+
+#### Scenario: Retained history reaches the client safety cap
+- GIVEN loaded pages for an active symbol/timeframe query reach the 20,000-candle retention boundary
+- WHEN the operator navigates near the oldest retained candle
+- THEN no additional older page is prefetched
+- AND the chart and visible range remain available without evicting retained pages below the cap
 
 ### Requirement: No non-analysis product paths
 
-The system MUST NOT expose real MT5 or CSV ingestion, source writes, broker/order paths, auth, live-feed controls, watchlists, or a timeframe selector in this slice. (Previously: the same exclusions applied while the market context was fixed to `NDX`.)
+The system MUST NOT expose real MT5 or CSV ingestion, source writes, broker/order paths, auth, live-feed controls, or watchlists in this slice. (Previously: the same exclusions applied while the market context was fixed to `NDX`.)
 
 #### Scenario: Execution or auth is sought
 - GIVEN a user looks for trading or account actions
 - WHEN the terminal renders
 - THEN those controls are not available
 
-#### Scenario: Ingestion or timeframe paths are sought
-- GIVEN a user looks for ingestion or timeframe controls
+#### Scenario: Ingestion paths are sought
+- GIVEN a user looks for ingestion controls
 - WHEN the terminal renders
 - THEN those paths are not present

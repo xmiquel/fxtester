@@ -35,25 +35,28 @@ validation and must never be implemented as cached state or an unconditional fal
 
 ```text
 /symbols ─→ fresh catalog query ─→ sorted {symbols: [...]}
-/symbols ─→ deterministic first symbol → selector → explicit /candles request → bounded 1m read
+/symbols ─→ deterministic first symbol → selector → explicit /candles request → selected-timeframe read
 health/ready ─→ database availability only (catalog cardinality ignored)
 ```
 
-All reads use the existing read-only DuckDB boundary, source-column fidelity,
-cursor paging, `1m` timeframe, and maximum 200 candles per response.
+All reads use the existing read-only DuckDB boundary and source-column fidelity.
+Cursor paging preserves the current multi-timeframe contract, with a maximum of 1000 candles per response.
+The frontend gates older-page prefetch on pointer navigation near the oldest retained range,
+preserves the chart and visible range while prepending, and retains loaded pages up to 20,000
+candles per active symbol/timeframe query without eviction below that cap.
 
 ## File Changes
 
 | File | Action | Description |
 |---|---|---|
-| `backend/app/features/candles/window.py` | Modify | Add catalog query and typed resolution/validation while preserving read-only, paging, `1m`, and 200 limits. |
+| `backend/app/features/candles/window.py` | Modify | Add catalog query and typed resolution/validation while preserving read-only, cursor paging, selected timeframes, and 1000-candle pages. |
 | `backend/app/main.py` | Modify | Keep `/symbols`, typed 400/503 contracts, and health/readiness independent of catalog cardinality; make omitted `symbol` optional. |
 | `backend/tests/test_candles.py` | Modify | Cover NDX omission success, omission without NDX typed 400, omission on discovery failure typed 503, explicit unsupported symbols, empty catalog, health, and existing bounds. |
 | `backend/openapi.json` / `frontend/src/api/generated.ts` | Regenerate | Reflect optional candle symbol and documented catalog/error schemas. |
 | `docker-compose.yml` | Modify | Keep backend health database-only; make frontend health verify the served browser document and Vite module entrypoint. |
 | `.github/workflows/ci.yml` | Modify | Seed NDX, verify explicit selected-symbol candles, valid empty-catalog health, browser rendering, OpenAPI drift, read-only mount, logs, and bounded response checks. |
 | `docs/operations.md` | Modify | Document selected-symbol operation, typed failures, empty-catalog health, and state-aware Compose/CI verification. |
-| `frontend/src/features/candles/{api,queryKeys,useSymbols,SymbolSelector,CandlestickChart}.ts*` | Modify/Create | Fetch and gate on the catalog, select the first symbol, isolate cache keys, and render accessible selector/empty/error states. |
+| `frontend/src/features/candles/{api,queryKeys,useSymbols,SymbolSelector,CandlestickChart}.ts*` | Modify/Create | Fetch and gate on the catalog, select the first symbol, isolate cache keys, retain loaded pages to the 20,000-candle cap, and render accessible selector/empty/error states. |
 
 ## Interfaces / Contracts
 
@@ -78,7 +81,7 @@ permitted.
 |---|---|---|
 | Unit/integration | Query filtering, deterministic catalog, resolution matrix, typed OpenAPI responses | Pytest repository fixtures and FastAPI `TestClient`. |
 | Runtime | Empty catalog remains healthy; NDX omission works; unavailable source remains 503 | Compose smoke scripts and CI temporary DuckDB scenarios. |
-| Frontend/E2E | Catalog gate prevents candle requests for empty/error catalogs; selector transitions isolate symbol paging/cache state and bounded paging remains unchanged | Vitest/MSW and Compose browser tests. |
+| Frontend/E2E | Catalog gate prevents candle requests for empty/error catalogs; selector transitions isolate symbol paging/cache state; near-edge prefetch, persistent range, and 20,000-candle retention remain enforced | Vitest/MSW and Compose browser tests. |
 
 ## Migration / Rollout
 

@@ -6,8 +6,8 @@ import { candleWindowQueryKey } from "./queryKeys";
 
 type CandleWindow = components["schemas"]["CandleWindow"];
 
-const MAX_WINDOW_PAGES = 3;
-const WINDOW_LIMIT = 200;
+export const CANDLE_PAGE_SIZE = 1000;
+export const MAX_RETAINED_CANDLES = 20_000;
 const CACHE_TIME_MS = 5 * 60 * 1000;
 
 interface CandleWindowParams {
@@ -17,7 +17,7 @@ interface CandleWindowParams {
   limit?: number;
 }
 
-export function useCandleWindow({ enabled = true, symbol, timeframe, limit = WINDOW_LIMIT }: CandleWindowParams) {
+export function useCandleWindow({ enabled = true, symbol, timeframe, limit = CANDLE_PAGE_SIZE }: CandleWindowParams) {
   return useInfiniteQuery<
     CandleWindow,
     Error,
@@ -29,8 +29,20 @@ export function useCandleWindow({ enabled = true, symbol, timeframe, limit = WIN
     queryFn: ({ pageParam, signal }) =>
       fetchCandleWindow({ symbol, timeframe, cursor: pageParam, limit, signal }),
     initialPageParam: null,
-    getNextPageParam: (lastPage) => (lastPage.has_more ? lastPage.next_cursor : undefined),
-    maxPages: MAX_WINDOW_PAGES,
+    getNextPageParam: (lastPage, allPages, lastPageParam, allPageParams) => {
+      const loadedCandleCount = allPages.reduce((total, page) => total + page.candles.length, 0);
+      if (
+        loadedCandleCount + limit > MAX_RETAINED_CANDLES ||
+        !lastPage.has_more ||
+        !lastPage.next_cursor ||
+        lastPage.next_cursor === lastPageParam ||
+        allPageParams.includes(lastPage.next_cursor)
+      ) {
+        return undefined;
+      }
+
+      return lastPage.next_cursor;
+    },
     retry: 0,
     enabled,
     staleTime: CACHE_TIME_MS,
@@ -39,7 +51,7 @@ export function useCandleWindow({ enabled = true, symbol, timeframe, limit = WIN
 }
 
 export const candleWindowPolicy = {
-  maxPages: MAX_WINDOW_PAGES,
-  limit: WINDOW_LIMIT,
+  limit: CANDLE_PAGE_SIZE,
+  maxRetainedCandles: MAX_RETAINED_CANDLES,
   cacheTimeMs: CACHE_TIME_MS,
 } as const;

@@ -29,7 +29,7 @@ class AggregatedCandle(TypedDict):
     fecha_carga: str
 
 
-def make_database(path: str, count: int = 205) -> None:
+def make_database(path: str, count: int = 1005) -> None:
     connection = duckdb.connect(path)
     connection.execute(
         '''CREATE TABLE dt_ohlc_m1 (
@@ -146,12 +146,12 @@ def test_candles_are_bounded_and_preserve_source_columns(tmp_path: Path) -> None
     make_database(str(database))
     client = TestClient(create_app(DuckDbCandleRepository(database)))
 
-    response = client.get("/candles", params={"symbol": "NDX", "limit": 500})
+    response = client.get("/candles", params={"symbol": "NDX", "limit": 1001})
 
     assert response.status_code == 422
     response = client.get("/candles", params={"symbol": "NDX"})
     body = response.json()
-    assert len(body["candles"]) == 200
+    assert len(body["candles"]) == 1000
     assert set(body["candles"][0]) == {column.strip('"') for column in SOURCE_COLUMNS}
     assert body["candles"][0]["symbol"] == "NDX"
     assert body["timeframe"] == "1m"
@@ -666,7 +666,7 @@ def test_invalid_cursor_and_limit_are_rejected(tmp_path: Path) -> None:
         == 422
     )
     assert client.get("/candles", params={"symbol": "NDX", "limit": 0}).status_code == 422
-    assert client.get("/candles", params={"symbol": "NDX", "limit": 201}).status_code == 422
+    assert client.get("/candles", params={"symbol": "NDX", "limit": 1001}).status_code == 422
 
 
 def test_lower_limit_boundary_returns_one_candle(tmp_path: Path) -> None:

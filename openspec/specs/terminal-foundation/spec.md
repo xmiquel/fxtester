@@ -8,12 +8,12 @@ Define the first-slice terminal foundation for a single-trader workspace backed 
 
 ### Requirement: Read-only DuckDB market source
 
-The system MUST use `D:\repos_2026\98-tstlocal\data\market.duckdb` as the concrete source database, query `dt_ohlc_m1` for the initial `NDX` slice, and preserve source column fidelity for `datetime`, `symbol`, `OPEN`, `high`, `low`, quoted `close`, `tickvol`, `volume`, `spread`, `origen`, and `fecha_carga`. The backend/container MUST NOT mutate the source database.
+The system MUST use `D:\repos_2026\98-tstlocal\data\market.duckdb` as the concrete source database, query `dt_ohlc_m1` for discovered symbols and the selected timeframe, and preserve source column fidelity for `datetime`, `symbol`, `OPEN`, `high`, `low`, quoted `close`, `tickvol`, `volume`, `spread`, `origen`, and `fecha_carga`. The backend/container MUST NOT mutate the source database.
 
-#### Scenario: Load the initial NDX window
+#### Scenario: Load the initial selected-symbol window
 
 - GIVEN the host DuckDB file is mounted read-only
-- WHEN the backend requests the initial `NDX` candles from `dt_ohlc_m1`
+- WHEN the backend requests the initial candles for a discovered symbol from `dt_ohlc_m1`
 - THEN the response uses the source columns without renaming or mutation
 
 #### Scenario: Source mutation is attempted
@@ -24,7 +24,7 @@ The system MUST use `D:\repos_2026\98-tstlocal\data\market.duckdb` as the concre
 
 ### Requirement: Multi-timeframe bounded candle slice
 
-The system MUST support timeframes "1m", "5m", "15m", and "1h" via on-the-fly aggregation on `dt_ohlc_m1`. Non-"1m" aggregation MUST use epoch-aligned floor arithmetic equivalent to DuckDB `date_bin` with `TIMESTAMP 'epoch'` as the origin. The `/candles` endpoint MUST accept a `?timeframe=` query parameter. Each timeframe maps to a bucket interval of one minute, five minutes, 15 minutes, or one hour. Default remains "1m". The API MUST filter, order, and limit each response to at most 200 candles. The 200-candle policy MAY increase later without architectural change.
+The system MUST support timeframes "1m", "5m", "15m", and "1h" via on-the-fly aggregation on `dt_ohlc_m1`. Non-"1m" aggregation MUST use epoch-aligned floor arithmetic equivalent to DuckDB `date_bin` with `TIMESTAMP 'epoch'` as the origin. The `/candles` endpoint MUST accept a `?timeframe=` query parameter. Each timeframe maps to a bucket interval of one minute, five minutes, 15 minutes, or one hour. Default remains "1m". The API MUST filter, order, and limit each response to at most 1000 candles. The frontend MUST retain loaded cursor pages up to 20,000 candles per active symbol/timeframe query, with each page containing at most 1000 candles, and MUST stop prefetching at that safety cap.
 (Previously: "1m" was the only supported timeframe, no timeframe parameter)
 
 #### Scenario: Request with a valid timeframe

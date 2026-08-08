@@ -37,7 +37,7 @@ this requirement does not reintroduce a fixed-`NDX` frontend context.
 #### Scenario: Supported symbol is requested
 - GIVEN a symbol is present in the catalog
 - WHEN the client requests `/candles` for it
-- THEN the request is eligible for the existing bounded `1m` window
+- THEN the request is eligible for the existing bounded window at the requested timeframe
 
 #### Scenario: Unsupported symbol is requested
 - GIVEN a symbol is absent from the catalog
@@ -67,9 +67,9 @@ this requirement does not reintroduce a fixed-`NDX` frontend context.
 
 ### Requirement: Preserve explicit non-goals
 
-This capability MUST NOT add timeframes beyond `1m`, aggregation, orders, authentication, ingestion, writes, live feeds, watchlists, or full-history materialization. It MUST preserve the 200-candle response window and read-only source boundary.
+This capability MUST NOT add orders, authentication, ingestion, writes, live feeds, or watchlists. It MUST preserve the selected-timeframe read-only source boundary, 1000-candle pages, pointer-gated near-edge prefetch, persistent chart/range behavior, and loaded-page retention up to 20,000 candles per active symbol/timeframe query without eviction below the cap.
 
 #### Scenario: Non-goal is requested
-- GIVEN a client requests an order, write, alternate timeframe, or full history
+- GIVEN a client requests an order, write, unsupported product path, or full history
 - WHEN the system evaluates the request
 - THEN the capability does not provide that path

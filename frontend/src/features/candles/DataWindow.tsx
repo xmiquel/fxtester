@@ -23,23 +23,22 @@ function DataWindowRow({ label, value }: DataWindowRowProps) {
 }
 
 export function DataWindow({ candle, id, timeZone }: DataWindowProps) {
-  if (candle === null) {
-    return (
-      <aside aria-label="Candle data window" aria-live="polite" className="data-window" id={id}>
-        No candle selected.
-      </aside>
-    );
-  }
-
   return (
     <aside aria-label="Candle data window" aria-live="polite" className="data-window" id={id}>
+      <p
+        aria-label={candle === null ? "No candle selected." : undefined}
+        className="visually-hidden"
+        role="status"
+      >
+        {candle === null ? "No candle selected." : ""}
+      </p>
       <dl>
-        <DataWindowRow label={`Timestamp (${timeZone})`} value={candle.datetime} />
-        <DataWindowRow label="Open" value={candle.OPEN} />
-        <DataWindowRow label="High" value={candle.high} />
-        <DataWindowRow label="Low" value={candle.low} />
-        <DataWindowRow label="Close" value={candle.close} />
-        <DataWindowRow label="Volume" value={candle.volume} />
+        <DataWindowRow label={`Timestamp (${timeZone})`} value={candle?.datetime ?? ""} />
+        <DataWindowRow label="Open" value={candle?.OPEN ?? ""} />
+        <DataWindowRow label="High" value={candle?.high ?? ""} />
+        <DataWindowRow label="Low" value={candle?.low ?? ""} />
+        <DataWindowRow label="Close" value={candle?.close ?? ""} />
+        <DataWindowRow label="Volume" value={candle?.volume ?? ""} />
       </dl>
     </aside>
   );

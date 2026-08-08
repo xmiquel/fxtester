@@ -356,7 +356,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 200,
+              "default": 1000,
               "title": "Limit",
               "type": "integer"
             }

@@ -14,11 +14,15 @@ spend review budget on regenerated output.
 | Handwritten review | Focus on `backend/app/`, `frontend/src/`, tests, Compose, CI, and operational/release evidence. |
 | Verification boundary | Backend tests, frontend unit/build/lint/E2E checks, Compose validation, and Semgrep are the relevant gates. |
 
-## Frontend implementation
+## Historical PR 2 implementation snapshot (superseded)
 
 - One NDX `1m` Lightweight Charts view with navigation-triggered older windows.
 - TanStack Query retains at most three pages; chart coverage exercises the production hook and proves oldest-window eviction.
 - A transient initial or older-window failure exposes an accessible retry action. Older-window failures retain the rendered chart; chart tests verify recovery, `setData`, and cleanup.
+
+## Current paging and retention behavior
+
+The current implementation supersedes the historical snapshot above: it uses 1000-candle pages, pointer-gated prefetch near the oldest loaded range, persistent chart and visible-range state while older pages prepend, and retains loaded pages up to 20,000 candles per active symbol/timeframe query. No page eviction occurs below that cap; once the cap branch applies, another older request is not made and an accessible status is shown.
 
 ## Generated OpenAPI output
 

@@ -17,17 +17,19 @@ function candleAt(minute: number) {
   };
 }
 
+const PAGE_SIZE = 1000;
+
 const initialWindow = {
   symbol: "NDX",
   timeframe: "1m",
-  candles: Array.from({ length: 200 }, (_, index) => candleAt(index + 200)),
-  next_cursor: "2025-01-01T03:19:00",
+  candles: Array.from({ length: PAGE_SIZE }, (_, index) => candleAt(index + PAGE_SIZE)),
+  next_cursor: new Date(Date.UTC(2025, 0, 1, 0, PAGE_SIZE)).toISOString().slice(0, 19),
   has_more: true,
 };
 
 const olderWindow = {
   ...initialWindow,
-  candles: Array.from({ length: 200 }, (_, index) => candleAt(index)),
+  candles: Array.from({ length: PAGE_SIZE }, (_, index) => candleAt(index)),
   next_cursor: null,
   has_more: false,
 };
@@ -42,7 +44,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function panChartRight(page: Page) {
-  const canvas = page.getByTestId("chart-history");
+  const canvas = page.getByRole("region", { name: "NDX 1m candlestick chart" });
   await expect(canvas).toBeVisible();
   const box = await canvas.boundingBox();
   if (!box) throw new Error("Chart canvas not found");
@@ -54,7 +56,7 @@ async function panChartRight(page: Page) {
   await page.mouse.up();
 }
 
-test("renders one bounded window and requests older history only after navigation", async ({ page }) => {
+test("renders initial loaded history and requests older history only after navigation", async ({ page }) => {
   const requests: string[] = [];
   await page.route("**/api/candles?**", async (route) => {
     requests.push(route.request().url());
@@ -64,13 +66,13 @@ test("renders one bounded window and requests older history only after navigatio
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Trading Terminal" })).toBeVisible();
-  await expect(page.getByTestId("chart-history")).toBeVisible();
+  await expect(page.getByRole("region", { name: "NDX 1m candlestick chart" })).toBeVisible();
   await expect.poll(() => requests.length).toBe(1);
 
   await panChartRight(page);
   await expect.poll(() => requests.length).toBe(2);
-  expect(new URL(requests[1]).searchParams.get("cursor")).toBe("2025-01-01T03:19:00");
-  await expect(page.getByTestId("chart-history")).toHaveAttribute("data-candle-datetimes", /2025-01-01T00:00:00/);
+  expect(new URL(requests[1]).searchParams.get("cursor")).toBe("2025-01-01T16:40:00");
+  await expect(page.getByRole("region", { name: "NDX 1m candlestick chart" })).toHaveAttribute("data-candle-datetimes", /2025-01-01T00:00:00/);
 });
 
 test("shows and clears the candle data window as the crosshair enters and leaves a candle", async ({ page }) => {
@@ -86,15 +88,85 @@ test("shows and clears the candle data window as the crosshair enters and leaves
 
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   const dataWindow = page.getByRole("complementary", { name: "Candle data window" });
-  await expect(dataWindow).toContainText("Timestamp");
-  await expect(dataWindow).toContainText("Open");
-  await expect(dataWindow).toContainText("High");
-  await expect(dataWindow).toContainText("Low");
-  await expect(dataWindow).toContainText("Close");
-  await expect(dataWindow).toContainText("Volume");
+  for (const label of ["Timestamp (UTC)", "Open", "High", "Low", "Close", "Volume"]) {
+    await expect(dataWindow.getByText(label, { exact: true })).toBeVisible();
+  }
+  const values = dataWindow.getByRole("definition");
+  await expect(values.nth(0)).toHaveText(/^2025-01-\d{2}T\d{2}:\d{2}:\d{2}$/);
+  await expect(values.nth(1)).toHaveText("100");
+  await expect(values.nth(2)).toHaveText("105");
+  await expect(values.nth(3)).toHaveText("99");
+  await expect(values.nth(4)).toHaveText("103");
+  await expect(values.nth(5)).toHaveText("1");
 
   await page.mouse.move(box.x - 10, box.y + box.height / 2);
-  await expect(dataWindow).toContainText("No candle selected.");
+  await expect(dataWindow.getByRole("definition")).toHaveText(["", "", "", "", "", ""]);
+  await expect(dataWindow.getByRole("status", { name: "No candle selected." })).toHaveClass(/visually-hidden/);
+});
+
+test("places the data window beside the chart on desktop and below it on narrow screens", async ({ page }) => {
+  await page.route("**/api/candles?**", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(initialWindow) }),
+  );
+
+  await page.goto("/");
+  const chart = page.getByRole("region", { name: "NDX 1m candlestick chart" });
+  const dataWindow = page.getByRole("complementary", { name: "Candle data window" });
+  await expect(chart).toBeVisible();
+  await expect(dataWindow).toBeVisible();
+
+  const desktopChartBox = await chart.boundingBox();
+  const desktopDataWindowBox = await dataWindow.boundingBox();
+  if (!desktopChartBox || !desktopDataWindowBox) throw new Error("Chart layout is not measurable");
+  expect(desktopDataWindowBox.x).toBeGreaterThan(desktopChartBox.x + desktopChartBox.width);
+
+  await page.setViewportSize({ width: 640, height: 720 });
+  await expect(dataWindow).toBeVisible();
+  const narrowChartBox = await chart.boundingBox();
+  const narrowDataWindowBox = await dataWindow.boundingBox();
+  if (!narrowChartBox || !narrowDataWindowBox) throw new Error("Narrow chart layout is not measurable");
+  expect(narrowDataWindowBox.x).toBe(narrowChartBox.x);
+  expect(narrowDataWindowBox.y).toBeGreaterThan(narrowChartBox.y + narrowChartBox.height);
+});
+
+test("keeps a millisecond timestamp inside the data window while showing its labels", async ({ page }) => {
+  const longTimestamp = "2025-01-01T03:20:00.123";
+  await page.route("**/api/candles?**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...initialWindow,
+        candles: [{ ...initialWindow.candles[0], datetime: longTimestamp, fecha_carga: longTimestamp }, ...initialWindow.candles.slice(1)],
+      }),
+    }),
+  );
+
+  await page.goto("/");
+  const chart = page.getByRole("region", { name: "NDX 1m candlestick chart" });
+  const dataWindow = page.getByRole("complementary", { name: "Candle data window" });
+  await expect(chart).toBeVisible();
+  await chart.focus();
+  await chart.press("Home");
+
+  for (const label of ["Timestamp (UTC)", "Open", "High", "Low", "Close", "Volume"]) {
+    await expect(dataWindow.getByText(label, { exact: true })).toBeVisible();
+  }
+  await expect(dataWindow.getByRole("definition").nth(0)).toHaveText(longTimestamp);
+
+  const bounds = await dataWindow.evaluate((element) => {
+    const windowBox = element.getBoundingClientRect();
+    const childRight = Math.max(
+      ...Array.from(element.querySelectorAll("dt, dd"), (child) => child.getBoundingClientRect().right),
+    );
+    return {
+      childRight,
+      clientWidth: element.clientWidth,
+      right: windowBox.right,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+  expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth);
+  expect(bounds.childRight).toBeLessThanOrEqual(bounds.right);
 });
 
 test("selects a catalog symbol and resets candle requests to that symbol", async ({ page }) => {
@@ -140,7 +212,7 @@ test("retries an initial candle request failure on demand", async ({ page }) => 
 
   await expect(page.getByRole("alert")).toContainText("Unable to load candles (500)");
   await page.getByRole("button", { name: "Retry loading candles" }).click();
-  await expect(page.getByTestId("chart-history")).toHaveAttribute("data-candle-datetimes", /2025-01-01T03:20:00/);
+  await expect(page.getByRole("region", { name: "NDX 1m candlestick chart" })).toHaveAttribute("data-candle-datetimes", /2025-01-01T16:40:00/);
   expect(attempts).toBe(2);
   await expect.poll(() => clientEvents).toEqual([{ kind: "api_failure", message: "Unable to load candles (500)", path: "/" }]);
 });
@@ -168,17 +240,17 @@ test("keeps the chart visible after an older-window failure and retries", async 
   });
 
   await page.goto("/");
-  await expect(page.getByTestId("chart-history")).toHaveAttribute("data-candle-datetimes", /2025-01-01T03:20:00/);
+  await expect(page.getByRole("region", { name: "NDX 1m candlestick chart" })).toHaveAttribute("data-candle-datetimes", /2025-01-01T16:40:00/);
   await panChartRight(page);
   await expect.poll(() => olderRequests.length).toBeGreaterThan(0);
-  expect(new URL(olderRequests[0]).searchParams.get("cursor")).toBe("2025-01-01T03:19:00");
+  expect(new URL(olderRequests[0]).searchParams.get("cursor")).toBe("2025-01-01T16:40:00");
   await expect(page.getByRole("alert")).toContainText("Unable to load candles (503)");
-  await expect(page.getByTestId("chart-history")).toHaveAttribute("data-candle-datetimes", /2025-01-01T03:20:00/);
+  await expect(page.getByRole("region", { name: "NDX 1m candlestick chart" })).toHaveAttribute("data-candle-datetimes", /2025-01-01T16:40:00/);
 
   const failedOlderAttempts = olderAttempts;
   retryOlderWindow = true;
   await page.getByRole("button", { name: "Retry loading older candles" }).click();
-  await expect(page.getByTestId("chart-history")).toHaveAttribute("data-candle-datetimes", /2025-01-01T00:00:00/);
+  await expect(page.getByRole("region", { name: "NDX 1m candlestick chart" })).toHaveAttribute("data-candle-datetimes", /2025-01-01T00:00:00/);
   expect(olderAttempts).toBe(failedOlderAttempts + 1);
   await expect.poll(() => clientEvents).toEqual(
     Array.from({ length: failedOlderAttempts }, () => ({

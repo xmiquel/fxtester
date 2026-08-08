@@ -3,18 +3,22 @@
 body { margin: 0; min-width: 320px; }
 button { background: #3b82f6; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font: inherit; padding: 0.65rem 0.9rem; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
-.terminal-shell { margin: 0 auto; max-width: 1200px; padding: 2rem; }
+.terminal-shell { padding: 2rem; width: 100%; }
 .terminal-header, .chart-toolbar { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }
 .terminal-header { border-bottom: 1px solid #223047; margin-bottom: 1.5rem; }
 .eyebrow { color: #8da1bd; font-size: 0.75rem; letter-spacing: 0.08em; margin: 0; text-transform: uppercase; }
 h1, h2 { margin: 0.25rem 0 1rem; }
 .chart-panel { background: #101827; border: 1px solid #223047; border-radius: 10px; padding: 1rem; }
-.chart-content { position: relative; }
-.chart-canvas { min-height: 440px; width: 100%; }
+.chart-content { align-items: stretch; display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr) minmax(0, 12rem); }
+.chart-canvas { min-height: 440px; min-width: 0; width: 100%; }
 .chart-canvas:focus-visible { outline: 2px solid #60a5fa; outline-offset: 3px; }
-.data-window { background: #17243a; border: 1px solid #355071; border-radius: 6px; color: #e8eef8; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; }
-.data-window dl { display: grid; gap: 0.25rem 1rem; grid-template-columns: repeat(2, max-content); margin: 0; }
+.data-window { align-self: stretch; background: #17243a; border: 1px solid #355071; border-radius: 6px; color: #e8eef8; max-width: 12rem; min-width: 0; padding: 0.75rem; width: 100%; }
+.data-window dl { display: grid; gap: 0.25rem 1rem; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); margin: 0; }
 .data-window-row { display: contents; }
-.data-window dt { color: #8da1bd; }
-.data-window dd { margin: 0; }
+.data-window dt { color: #8da1bd; min-width: 0; overflow-wrap: anywhere; }
+.data-window dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .visually-hidden { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; clip: rect(0, 0, 0, 0); }
+@media (max-width: 640px) {
+  .chart-content { grid-template-columns: minmax(0, 1fr); }
+  .data-window { max-width: none; }
+}

@@ -69,8 +69,9 @@ from the same backend stdout.
 
 ## Observability baseline
 
-This first slice intentionally uses self-hosted structured application logs and runtime checks only.
-It does not provide Prometheus, Alertmanager, a `/metrics` endpoint, alert rules, or alert routing.
+This existing project-wide baseline intentionally uses self-hosted structured application logs and
+runtime checks only. It does not provide Prometheus, Alertmanager, a `/metrics` endpoint, alert rules,
+or alert routing. This focused candle-history change does not add a production metrics system.
 
 - Probe `/health` for liveness and `/ready` for database-backed deployment readiness. Readiness
   verifies source availability, not that the catalog contains at least one valid symbol.
@@ -161,10 +162,12 @@ the frontend image, and asserts those sentinels are absent from the resulting im
 The frontend first fetches `/symbols`, selects the deterministic first symbol, and exposes the
 catalog in an accessible selector. A valid empty catalog shows an accessible no-symbols state, and
 catalog failure shows an accessible retryable error; neither state requests candles. Changing the
-selection uses an isolated symbol-keyed cursor cache. Once the chart is active, it requests an older
-cursor window only when the operator selects **Load older candles**; TanStack Query retains at most
-    three bounded pages and does not materialize full history. Timeframe aggregation remains in
-    DuckDB, not the browser, for the supported `1m`, `5m`, `15m`, and `1h` intervals.
+selection uses an isolated symbol/timeframe-keyed cursor cache. Once the chart is active, it requests older
+cursor windows in 1000-candle pages only after a deliberate pointer drag approaches the left boundary;
+prepending preserves the visible logical range. Loaded pages are retained up to 20,000 candles per
+active symbol/timeframe query, and older history loading stops at that safety cap without evicting
+retained candles below it. Timeframe aggregation remains in DuckDB, not the browser, for the supported
+`1m`, `5m`, `15m`, and `1h` intervals.
 
 Run the matching frontend gates before release:
 

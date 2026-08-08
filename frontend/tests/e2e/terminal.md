@@ -1,9 +1,9 @@
 ### E2E Tests: Terminal chart
 
 **Suite ID:** `TERMINAL-E2E`
-**Feature:** Bounded NDX one-minute chart navigation.
+**Feature:** Retained loaded NDX one-minute chart history navigation.
 
-## Test Case: `TERMINAL-E2E-001` - Load an older window on demand
+## Test Case: `TERMINAL-E2E-001` - Prefetch older history by dragging
 
 **Priority:** `high`
 
@@ -18,12 +18,13 @@
 ### Flow Steps:
 1. Open the terminal.
 2. Verify the first request loads the initial window only.
-3. Select **Load older candles**.
+3. Drag the chart toward the beginning of the loaded history until the prefetch threshold is reached.
 
 ### Expected Result:
 - The first chart window renders.
 - A second request carries the cursor returned by the first response.
 - No full history is requested before navigation.
+- The newly loaded older candles are retained with the existing chart history.
 
 ## Test Case: `TERMINAL-E2E-002` - Recover from a transient older-window failure
 
@@ -35,7 +36,7 @@
 
 ### Flow Steps:
 1. Render the first candle window.
-2. Make the first older-window request fail.
+2. Drag toward the beginning to trigger the first older-window prefetch, then make that request fail.
 3. Select **Retry loading older candles**.
 
 ### Expected Result:

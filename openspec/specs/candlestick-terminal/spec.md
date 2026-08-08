@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define how the terminal renders and pages `1m` candlesticks from bounded backend windows in the first slice.
+Define how the terminal renders and pages supported multi-timeframe candlesticks from bounded backend windows in the first slice.
 
 ## Delivery Status
 
@@ -34,9 +34,9 @@ The system MUST display candlesticks from backend-delivered windows at the selec
 - WHEN the timeframe changes to "1h"
 - THEN the chart clears and requests a new window at "1h"
 
-### Requirement: Page history with bounded cursor windows
+### Requirement: Page history with retained cursor windows
 
-The system MUST request another backend window only after user navigation moves beyond the currently loaded range. Cursor values MUST align with bucket boundaries of the selected timeframe. Each timeframe MUST maintain its own cursor state via distinct React Query cache keys. The UI MUST NOT materialize the full historical series in memory.
+The system MUST request another backend window only after pointer-gated user navigation reaches the near edge of the currently loaded range. Cursor values MUST align with bucket boundaries of the selected timeframe. Each symbol/timeframe MUST maintain its own cursor state via distinct React Query cache keys. The chart instance and visible logical range MUST persist while older pages are prepended. Loaded pages MUST be retained up to 20,000 candles per active symbol/timeframe query, with no eviction below that cap.
 (Previously: single cursor, 1m bucket alignment only)
 
 #### Scenario: Move to earlier candles at selected timeframe
@@ -44,11 +44,18 @@ The system MUST request another backend window only after user navigation moves 
 - GIVEN a candle window is already loaded at "15m"
 - WHEN the user navigates to an earlier range
 - THEN the backend receives a cursor aligned to a 15-minute bucket boundary
-- AND the next older window is fetched
+- AND the next older window is fetched only after the pointer-gated near-edge threshold is reached
+
+#### Scenario: Retention cap prevents another page
+
+- GIVEN loaded pages approach the 20,000-candle limit for the active symbol/timeframe query
+- WHEN the final retained page reports `has_more: true` but another 1000-candle page would exceed the cap
+- THEN no additional request is made
+- AND the cap status is shown without evicting retained candles
 
 #### Scenario: Initial load is requested
 
 - GIVEN the terminal opens for the first time
 - WHEN the chart requests data
-- THEN only the first bounded window is loaded
+- THEN only the first page of at most 1000 candles is loaded
 - AND the cursor is set to the latest bucket boundary of the selected timeframe

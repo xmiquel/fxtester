@@ -18,6 +18,14 @@ Chain strategy: stacked-to-main
 
 800-line session budget: keep each implementation session within approximately 800 changed lines and stop at the selected work-unit boundary. The additional remediation remains inside the PR1 boundary.
 
+## Preserved runtime contract
+
+This symbol-selection change preserves the current multi-timeframe terminal contract: supported
+timeframes remain selectable, candle responses remain capped at 1000 candles per page, older pages
+remain pointer-prefetched near the oldest range, chart and visible-range restoration remains stable
+while pages prepend, and loaded candles remain retained up to 20,000 per active symbol/timeframe
+query without eviction below the cap.
+
 ### Suggested Work Units
 
 | Unit | Goal | Likely PR | Notes |
@@ -27,20 +35,20 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Backend Foundation and Contract
 
-- [x] 1.1 Modify `backend/app/features/candles/window.py` to list distinct non-empty symbols in deterministic order through read-only DuckDB, and validate candle symbols against the fresh catalog while retaining `1m`, cursor paging, and the 200-row cap.
+- [x] 1.1 Modify `backend/app/features/candles/window.py` to list distinct non-empty symbols in deterministic order through read-only DuckDB, and validate candle symbols against the fresh catalog while retaining selected-timeframe cursor paging and the 1000-row page cap.
 - [x] 1.2 Modify `backend/app/main.py` with typed `SymbolCatalog`, `UnsupportedSymbol`, and `ServiceUnavailable` responses; add `GET /symbols`, documented 400/503 candle/catalog responses, and temporary omitted-symbol-to-NDX compatibility only when fresh discovery contains NDX.
-- [x] 1.3 Add backend fixtures/tests in `backend/tests/test_candles.py` for sorting/deduplication/filtering, empty catalog, unavailable database, unsupported symbols, read-only safety, and unchanged 200-row paging.
+- [x] 1.3 Add backend fixtures/tests in `backend/tests/test_candles.py` for sorting/deduplication/filtering, empty catalog, unavailable database, unsupported symbols, read-only safety, and unchanged 1000-row paging.
 
 ## Phase 2: OpenAPI and Frontend Core
 
 - [x] 2.1 Export `backend/openapi.json` and regenerate `frontend/src/api/generated.ts` with `npm run generate:api --prefix frontend`; verify schemas and status envelopes match the concrete API.
 - [x] 2.2 Extend `frontend/src/features/candles/api.ts` and `queryKeys.ts`, then create `useSymbols.ts` with typed catalog fetching, abort/error handling, bounded retry/cache policy, and symbol-aware candle identity.
-- [x] 2.3 Create `SymbolSelector.tsx`; modify `frontend/src/App.tsx` and `CandlestickChart.tsx` to gate candles on catalog readiness, select the deterministic first symbol, remove fixed NDX text, and render accessible loading/error/empty/selection states.
+- [x] 2.3 Create `SymbolSelector.tsx`; modify `frontend/src/App.tsx` and `CandlestickChart.tsx` to gate candles on catalog readiness, select the deterministic first symbol, remove fixed NDX text, retain loaded pages to the 20,000-candle cap, and render accessible loading/error/empty/selection states.
 
 ## Phase 3: Verification and Runtime Integration
 
-- [x] 3.1 Extend `frontend/tests/candles/{api,queryKeys,CandlestickChart}.test.ts*` for typed catalog calls, key isolation, symbol transitions, paging reset, and all accessible states; extend `frontend/tests/e2e/terminal.spec.ts` for selection and bounded older-window behavior.
-- [x] 3.2 Update `docker-compose.yml` health checks and `README.md` for `/symbols`, selected-symbol startup, explicit empty/unavailable behavior, read-only mount, and preserved 1m/200/no-order boundaries.
+- [x] 3.1 Extend `frontend/tests/candles/{api,queryKeys,CandlestickChart}.test.ts*` for typed catalog calls, key isolation, symbol transitions, paging reset, near-edge prefetch, persistent range, 20,000-candle retention, and all accessible states; extend `frontend/tests/e2e/terminal.spec.ts` for selection and older-window behavior.
+- [x] 3.2 Update `docker-compose.yml` health checks and `README.md` for `/symbols`, selected-symbol startup, explicit empty/unavailable behavior, read-only mount, and preserved selected-timeframe/1000-page/20,000-retention/no-order boundaries.
 - [x] 3.3 Update `.github/workflows/ci.yml` to regenerate/check OpenAPI types and run backend, frontend, and Compose/browser verification; confirm no generated-contract drift or silent NDX fallback.
 
 ## Phase 4: Final Review
@@ -61,9 +69,9 @@ the current frontend sends explicitly selected catalog symbols, while the backen
 retains omitted-symbol-to-`NDX` compatibility only for legacy callers.
 
 - [x] R4 In `backend/app/main.py` and `backend/app/features/candles/window.py`, make `symbol` optional only for `/candles`; resolve omission from the same fresh catalog to NDX, and never default on missing NDX, empty results, or discovery failure.
-- [x] R5 In `backend/app/main.py`, map unresolved/unsupported explicit or omitted symbols to the typed 400 envelope and catalog/database failures to the typed 503 envelope; preserve explicit-symbol validation and existing 1m/200 behavior.
+- [x] R5 In `backend/app/main.py`, map unresolved/unsupported explicit or omitted symbols to the typed 400 envelope and catalog/database failures to the typed 503 envelope; preserve explicit-symbol validation and existing selected-timeframe/1000-page behavior.
 - [x] R6 Regenerate `backend/openapi.json` and `frontend/src/api/generated.ts`; verify optional `symbol`, 400/503 response unions, and generated-contract drift checks match runtime behavior.
-- [x] R7 Extend `backend/tests/test_candles.py` with fresh-NDX omission success, omission-without-NDX 400, omission-on-discovery-failure 503, explicit unsupported 400, and unchanged bounded-window cases.
+- [x] R7 Extend `backend/tests/test_candles.py` with fresh-NDX omission success, omission-without-NDX 400, omission-on-discovery-failure 503, explicit unsupported 400, and unchanged 1000-page/cap cases.
 - [x] R8 Correct `docker-compose.yml` health probes so an empty valid catalog remains healthy while unavailable sources fail; add runtime coverage for empty, NDX-compatible, and recovery states.
 - [x] R9 Correct `.github/workflows/ci.yml` and `docs/operations.md` smoke commands to seed/check NDX only where required, exercise typed 400/503 paths, validate empty-catalog health, and document the PR1/PR2 boundary.
 - [x] R10 At the PR1 boundary, distinguish omitted `symbol` from explicit `symbol=` with typed 400 coverage; add the fixed-NDX catalog gate with accessible empty/error retry states and no candle request for unavailable catalog states; add Compose/CI typed-503 smoke coverage. The selector was deferred only until the completed PR2 work unit.

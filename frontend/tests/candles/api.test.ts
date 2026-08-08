@@ -17,7 +17,7 @@ test("forwards the query AbortSignal to fetch", async () => {
     ),
   );
 
-  await fetchCandleWindow({ symbol: "NDX", timeframe: "1m", cursor: null, limit: 200, signal: controller.signal });
+  await fetchCandleWindow({ symbol: "NDX", timeframe: "1m", cursor: null, limit: 1000, signal: controller.signal });
 
   expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/candles?"), { signal: controller.signal });
   fetchMock.mockRestore();
@@ -42,7 +42,7 @@ test("rejects a duplicate timestamp within one candle response", async () => {
   );
 
   await expect(
-    fetchCandleWindow({ symbol: "NDX", timeframe: "5m", cursor: null, limit: 200, signal: controller.signal }),
+    fetchCandleWindow({ symbol: "NDX", timeframe: "5m", cursor: null, limit: 1000, signal: controller.signal }),
   ).rejects.toThrow("Candle response contains duplicate timestamp: 2025-01-01T00:00:00");
   expect(reportClientEvent).toHaveBeenCalledWith(
     CLIENT_EVENT_KIND.API_FAILURE,
@@ -96,7 +96,7 @@ test("reports a transport failure without sending request details", async () => 
   const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(error);
 
   await expect(
-    fetchCandleWindow({ symbol: "NDX", timeframe: "1m", cursor: null, limit: 200, signal: controller.signal }),
+    fetchCandleWindow({ symbol: "NDX", timeframe: "1m", cursor: null, limit: 1000, signal: controller.signal }),
   ).rejects.toThrow("Failed to fetch");
 
   expect(reportClientEvent).toHaveBeenCalledWith(CLIENT_EVENT_KIND.API_FAILURE, error);
@@ -112,7 +112,7 @@ test("reports a JSON parse failure without sending response content", async () =
   } as unknown as Response);
 
   await expect(
-    fetchCandleWindow({ symbol: "NDX", timeframe: "1m", cursor: null, limit: 200, signal: controller.signal }),
+    fetchCandleWindow({ symbol: "NDX", timeframe: "1m", cursor: null, limit: 1000, signal: controller.signal }),
   ).rejects.toThrow("Unexpected token '<'");
 
   expect(reportClientEvent).toHaveBeenCalledWith(CLIENT_EVENT_KIND.API_FAILURE, error);
