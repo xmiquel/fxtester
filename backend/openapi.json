@@ -1,6 +1,130 @@
 {
   "components": {
     "schemas": {
+      "BacktestRequest": {
+        "properties": {
+          "fees": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Fees",
+            "type": "number"
+          },
+          "initial_cash": {
+            "default": 10000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "limit": {
+            "default": 5000,
+            "maximum": 5000.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "slippage": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Slippage",
+            "type": "number"
+          },
+          "strategy": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Strategy",
+            "type": "string"
+          },
+          "symbol": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Symbol",
+            "type": "string"
+          },
+          "timeframe": {
+            "default": "1m",
+            "maxLength": 10,
+            "minLength": 2,
+            "title": "Timeframe",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "strategy"
+        ],
+        "title": "BacktestRequest",
+        "type": "object"
+      },
+      "BacktestResponse": {
+        "properties": {
+          "candle_count": {
+            "title": "Candle Count",
+            "type": "integer"
+          },
+          "final_value": {
+            "title": "Final Value",
+            "type": "number"
+          },
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "max_drawdown": {
+            "title": "Max Drawdown",
+            "type": "number"
+          },
+          "sharpe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Ratio"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "timeframe": {
+            "title": "Timeframe",
+            "type": "string"
+          },
+          "total_return": {
+            "title": "Total Return",
+            "type": "number"
+          },
+          "total_trades": {
+            "title": "Total Trades",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "symbol",
+          "timeframe",
+          "strategy",
+          "candle_count",
+          "initial_cash",
+          "final_value",
+          "total_return",
+          "max_drawdown",
+          "sharpe_ratio",
+          "total_trades"
+        ],
+        "title": "BacktestResponse",
+        "type": "object"
+      },
       "Candle": {
         "properties": {
           "OPEN": {
@@ -152,6 +276,35 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "InvalidStrategyParameters": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "const": "invalid_strategy_parameters",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "detail",
+          "strategy"
+        ],
+        "title": "InvalidStrategyParameters",
+        "type": "object"
+      },
       "ServiceUnavailable": {
         "properties": {
           "detail": {
@@ -190,6 +343,35 @@
           "symbols"
         ],
         "title": "SymbolCatalog",
+        "type": "object"
+      },
+      "UnsupportedStrategy": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "const": "unsupported_strategy",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "detail",
+          "strategy"
+        ],
+        "title": "UnsupportedStrategy",
         "type": "object"
       },
       "UnsupportedSymbol": {
@@ -305,6 +487,81 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/backtests": {
+      "post": {
+        "operationId": "backtests_backtests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/UnsupportedSymbol"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnsupportedTimeframe"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnsupportedStrategy"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidStrategyParameters"
+                    }
+                  ],
+                  "title": "Response 400 Backtests Backtests Post"
+                }
+              }
+            },
+            "description": "The requested analysis inputs are not supported."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailable"
+                }
+              }
+            },
+            "description": "The market source cannot be read."
+          }
+        },
+        "summary": "Backtests",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
     "/candles": {
       "get": {
         "operationId": "candles_candles_get",
