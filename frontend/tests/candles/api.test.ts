@@ -80,7 +80,7 @@ test("reports and rejects an unavailable symbol catalog", async () => {
 
 test("fetches and returns the available timeframes", async () => {
   const controller = new AbortController();
-  const timeframes = ["1m", "5m", "15m", "1h"];
+  const timeframes = ["1m", "2m", "5m", "15m", "1h"];
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify(timeframes), { status: 200 }),
   );

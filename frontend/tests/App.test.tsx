@@ -30,7 +30,7 @@ test("selects the first catalog symbol and isolates the next candle request by s
   const candleSymbols: string[] = [];
   server.use(
     http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["DAX", "SPX"] })),
-    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "5m", "15m", "1h"])),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "2m", "5m", "15m", "1h"])),
     http.get("*/api/candles", ({ request }) => {
       const symbol = new URL(request.url).searchParams.get("symbol");
       candleSymbols.push(symbol ?? "");
@@ -52,7 +52,7 @@ test("selects the first catalog symbol and isolates the next candle request by s
 test("renders timeframe selector and switches timeframe", async () => {
   server.use(
     http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
-    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "5m", "15m", "1h"])),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "2m", "5m", "15m", "1h"])),
     http.get("*/api/candles", ({ request }) => {
       const timeframe = new URL(request.url).searchParams.get("timeframe") ?? "1m";
       return HttpResponse.json({ candles: [], has_more: false, next_cursor: null, symbol: "NDX", timeframe });
@@ -70,6 +70,48 @@ test("renders timeframe selector and switches timeframe", async () => {
   expect(screen.getByText("Selected symbol · 5m")).toBeInTheDocument();
 });
 
+test("switches to a custom timeframe and represents it in the selector", async () => {
+  server.use(
+    http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "2m", "5m", "15m", "1h"])),
+    http.get("*/api/candles", ({ request }) => {
+      const timeframe = new URL(request.url).searchParams.get("timeframe") ?? "1m";
+      return HttpResponse.json({ candles: [], has_more: false, next_cursor: null, symbol: "NDX", timeframe });
+    }),
+  );
+
+  renderApp();
+
+  const timeframeSelector = await screen.findByRole("combobox", { name: "Timeframe" });
+  await screen.findByText("No NDX 1m candles are available.");
+  fireEvent.keyDown(window, { key: "3" });
+  fireEvent.keyDown(window, { key: "h" });
+
+  expect(timeframeSelector).toHaveValue("3h");
+  expect(screen.getByRole("option", { name: "3h" })).toBeInTheDocument();
+  expect(await screen.findByText("No NDX 3h candles are available.")).toBeInTheDocument();
+  expect(timeframeSelector).toHaveAccessibleDescription(/Type any positive integer.*6m or 3h/);
+});
+
+test("does not switch timeframe when the selector owns the keyboard event", async () => {
+  server.use(
+    http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "2m", "5m", "15m", "1h"])),
+    http.get("*/api/candles", ({ request }) => {
+      const timeframe = new URL(request.url).searchParams.get("timeframe") ?? "1m";
+      return HttpResponse.json({ candles: [], has_more: false, next_cursor: null, symbol: "NDX", timeframe });
+    }),
+  );
+
+  renderApp();
+
+  const timeframeSelector = await screen.findByRole("combobox", { name: "Timeframe" });
+  fireEvent.keyDown(timeframeSelector, { key: "1" });
+  fireEvent.keyDown(timeframeSelector, { key: "h" });
+
+  expect(timeframeSelector).toHaveValue("1m");
+});
+
 test("renders empty and retryable catalog states without requesting candles", async () => {
   let candleRequests = 0;
   let catalogAttempts = 0;
@@ -78,7 +120,7 @@ test("renders empty and retryable catalog states without requesting candles", as
       catalogAttempts += 1;
       return catalogAttempts === 1 ? new HttpResponse(null, { status: 503 }) : HttpResponse.json({ symbols: [] });
     }),
-    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "5m", "15m", "1h"])),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "2m", "5m", "15m", "1h"])),
     http.get("*/api/candles", () => {
       candleRequests += 1;
       return HttpResponse.json({});

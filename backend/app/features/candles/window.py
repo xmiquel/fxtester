@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,16 +10,18 @@ import duckdb
 from fastapi import HTTPException
 
 SOURCE_DATABASE = Path("/data/market.duckdb")
-SUPPORTED_TIMEFRAMES: frozenset[str] = frozenset({"1m", "5m", "15m", "1h"})
+SUPPORTED_TIMEFRAMES: frozenset[str] = frozenset({"1m", "2m", "5m", "15m", "1h"})
 DEFAULT_TIMEFRAME: str = "1m"
-# Epoch seconds for each timeframe — used for floor-division binning via
+# Epoch seconds for preset timeframes — used for preset ordering and API output.
 #   TIMESTAMP 'epoch' + (epoch_seconds // bucket_seconds * bucket_seconds) * INTERVAL '1 second'
 TIMEFRAME_BUCKET_SECONDS: dict[str, int] = {
     "1m": 60,
+    "2m": 120,
     "5m": 300,
     "15m": 900,
     "1h": 3600,
 }
+TIMEFRAME_TOKEN_PATTERN = re.compile(r"^(?P<amount>[1-9][0-9]*)(?P<unit>[mh])$", re.IGNORECASE)
 EPOCH = datetime(1970, 1, 1)
 SOURCE_TABLE = "dt_ohlc_m1"
 CANDLE_WINDOW_LIMIT = 1000
@@ -82,6 +85,23 @@ class CandleWindow:
     has_more: bool
 
 
+@dataclass(frozen=True)
+class ParsedTimeframe:
+    token: str
+    bucket_seconds: int
+
+
+def parse_timeframe(timeframe: str) -> ParsedTimeframe | None:
+    match = TIMEFRAME_TOKEN_PATTERN.fullmatch(timeframe)
+    if match is None:
+        return None
+
+    amount = int(match.group("amount"))
+    unit = match.group("unit").lower()
+    multiplier = 3600 if unit == "h" else 60
+    return ParsedTimeframe(token=f"{amount}{unit}", bucket_seconds=amount * multiplier)
+
+
 class DatabaseUnavailable(RuntimeError):
     """Raised when the configured source cannot be opened or queried."""
 
@@ -100,19 +120,21 @@ class UnsupportedTimeframeError(ValueError):
 
     def __init__(self, timeframe: str) -> None:
         self.timeframe = timeframe
-        supported = sorted(SUPPORTED_TIMEFRAMES, key=lambda tf: TIMEFRAME_BUCKET_SECONDS[tf])
-        super().__init__(f"Unsupported timeframe '{timeframe}'. Supported: {supported}")
+        super().__init__(
+            f"Unsupported timeframe '{timeframe}'. "
+            "Expected a positive integer followed by 'm' or 'h'."
+        )
 
 
-def normalize_cursor_to_bucket(cursor: datetime, timeframe: str) -> datetime:
+def normalize_cursor_to_bucket(cursor: datetime, bucket_seconds: int) -> datetime:
     """Return the inclusive bucket start used as an aggregate cursor boundary."""
-    if timeframe == "1m":
+    if bucket_seconds == TIMEFRAME_BUCKET_SECONDS[DEFAULT_TIMEFRAME]:
         return cursor
 
     if cursor.tzinfo is not None:
         cursor = cursor.astimezone(timezone.utc).replace(tzinfo=None)
 
-    bucket = timedelta(seconds=TIMEFRAME_BUCKET_SECONDS[timeframe])
+    bucket = timedelta(seconds=bucket_seconds)
     return EPOCH + ((cursor - EPOCH) // bucket) * bucket
 
 
@@ -135,10 +157,14 @@ class DuckDbCandleRepository:
     def read_window(
         self, symbol: str, timeframe: str, cursor: datetime | None, limit: int
     ) -> CandleWindow:
+        parsed_timeframe = parse_timeframe(timeframe)
+        if parsed_timeframe is None:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
         try:
             # The connection is read-only and the limit is applied by DuckDB.
             with duckdb.connect(str(self.database_path), read_only=True) as connection:
-                if timeframe == "1m":
+                if parsed_timeframe.token == DEFAULT_TIMEFRAME:
                     parameters: list[object] = [symbol]
                     if cursor is None:
                         query = f"""
@@ -158,7 +184,7 @@ class DuckDbCandleRepository:
                         """  # noqa: S608 - identifiers are module constants
                         parameters.append(cursor)
                 else:
-                    bucket_seconds = TIMEFRAME_BUCKET_SECONDS[timeframe]
+                    bucket_seconds = parsed_timeframe.bucket_seconds
                     bucket_expression = f"""TIMESTAMP 'epoch' + (
                             CAST(FLOOR(EXTRACT(epoch FROM datetime)) AS BIGINT)
                             // {bucket_seconds} * {bucket_seconds}
@@ -230,7 +256,8 @@ class CandleWindowService:
     def get_window(
         self, symbol: str | None, timeframe: str, cursor: str | None, limit: int
     ) -> dict[str, object]:
-        if timeframe not in SUPPORTED_TIMEFRAMES:
+        parsed_timeframe = parse_timeframe(timeframe)
+        if parsed_timeframe is None:
             raise UnsupportedTimeframeError(timeframe)
         if limit < 1 or limit > CANDLE_WINDOW_LIMIT:
             raise HTTPException(
@@ -243,15 +270,19 @@ class CandleWindowService:
                 parsed_cursor = datetime.fromisoformat(cursor)
             except ValueError as error:
                 raise HTTPException(status_code=422, detail="cursor must be ISO-8601") from error
-            parsed_cursor = normalize_cursor_to_bucket(parsed_cursor, timeframe)
+            parsed_cursor = normalize_cursor_to_bucket(
+                parsed_cursor, parsed_timeframe.bucket_seconds
+            )
         catalog = self.repository.list_symbols()
         effective_symbol = OMITTED_SYMBOL_COMPATIBILITY_DEFAULT if symbol is None else symbol
         if effective_symbol not in catalog:
             raise UnsupportedSymbolError(effective_symbol)
-        window = self.repository.read_window(effective_symbol, timeframe, parsed_cursor, limit)
+        window = self.repository.read_window(
+            effective_symbol, parsed_timeframe.token, parsed_cursor, limit
+        )
         return {
             "symbol": effective_symbol,
-            "timeframe": timeframe,
+            "timeframe": parsed_timeframe.token,
             "candles": window.candles,
             "next_cursor": window.next_cursor,
             "has_more": window.has_more,
