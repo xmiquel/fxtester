@@ -1,8 +1,29 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import pandas as pd  # type: ignore[import-untyped]
+
+StrategyParameterKind = Literal["integer", "number", "boolean", "string"]
+StrategyParameterValue = int | float | bool | str
+
+
+@dataclass(frozen=True)
+class StrategyParameterDefinition:
+    name: str
+    label: str
+    kind: StrategyParameterKind
+    default: StrategyParameterValue
+    minimum: int | float | None = None
+    maximum: int | float | None = None
+
+
+@dataclass(frozen=True)
+class StrategyDefinition:
+    name: str
+    label: str
+    description: str
+    parameters: tuple[StrategyParameterDefinition, ...]
 
 
 @dataclass(frozen=True)
@@ -16,6 +37,7 @@ class StrategyResult:
 
 class Strategy(Protocol):
     name: str
+    definition: StrategyDefinition
 
     def validate_parameters(self, parameters: Mapping[str, object]) -> dict[str, object]: ...
 

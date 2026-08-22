@@ -5,7 +5,11 @@ from typing import Any, cast
 import pandas as pd  # type: ignore[import-untyped]
 import vectorbt as vbt  # type: ignore[import-untyped]
 
-from app.features.analysis.strategies.base import StrategyResult
+from app.features.analysis.strategies.base import (
+    StrategyDefinition,
+    StrategyParameterDefinition,
+    StrategyResult,
+)
 
 
 class InvalidSmaCrossParameters(ValueError):
@@ -15,6 +19,29 @@ class InvalidSmaCrossParameters(ValueError):
 class SmaCrossStrategy:
     name = "sma_cross"
     _default_parameters = {"fast_window": 10, "slow_window": 30}
+    definition = StrategyDefinition(
+        name=name,
+        label="SMA crossover",
+        description="Trade long when a fast simple moving average crosses above a slow one.",
+        parameters=(
+            StrategyParameterDefinition(
+                name="fast_window",
+                label="Fast window",
+                kind="integer",
+                default=10,
+                minimum=1,
+                maximum=500,
+            ),
+            StrategyParameterDefinition(
+                name="slow_window",
+                label="Slow window",
+                kind="integer",
+                default=30,
+                minimum=2,
+                maximum=1000,
+            ),
+        ),
+    )
 
     def validate_parameters(self, parameters: Mapping[str, object]) -> dict[str, object]:
         unknown = set(parameters) - set(self._default_parameters)

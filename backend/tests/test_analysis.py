@@ -117,6 +117,8 @@ def test_backtest_result_is_deterministic_and_typed(analysis_client: TestClient)
         "symbol",
         "timeframe",
         "strategy",
+        "start_datetime",
+        "end_datetime",
         "candle_count",
         "initial_cash",
         "final_value",
@@ -127,6 +129,8 @@ def test_backtest_result_is_deterministic_and_typed(analysis_client: TestClient)
     }
     assert body["symbol"] == "NDX"
     assert body["timeframe"] == "1m"
+    assert body["start_datetime"] == "2025-01-01T00:00:00"
+    assert body["end_datetime"] == "2025-01-01T00:09:00"
     assert body["candle_count"] == 10
     assert body["initial_cash"] == 1000.0
     assert body["total_trades"] == 2
@@ -190,6 +194,37 @@ def test_invalid_strategy_parameters_are_a_typed_400(analysis_client: TestClient
     }
 
 
+def test_strategy_catalog_is_registry_driven_and_typed(analysis_client: TestClient) -> None:
+    response = analysis_client.get("/backtests/strategies")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "name": "sma_cross",
+            "label": "SMA crossover",
+            "description": "Trade long when a fast simple moving average crosses above a slow one.",
+            "parameters": [
+                {
+                    "name": "fast_window",
+                    "label": "Fast window",
+                    "kind": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 500,
+                },
+                {
+                    "name": "slow_window",
+                    "label": "Slow window",
+                    "kind": "integer",
+                    "default": 30,
+                    "minimum": 2,
+                    "maximum": 1000,
+                },
+            ],
+        }
+    ]
+
+
 def test_unavailable_database_is_a_typed_503(tmp_path: Path) -> None:
     client = TestClient(create_app(DuckDbCandleRepository(tmp_path / "missing.duckdb")))
 
@@ -238,3 +273,10 @@ def test_openapi_documents_backtest_contract(analysis_client: TestClient) -> Non
         "#/components/schemas/UnsupportedStrategy",
         "#/components/schemas/InvalidStrategyParameters",
     }
+
+    catalog_operation = analysis_client.get("/openapi.json").json()["paths"][
+        "/backtests/strategies"
+    ]["get"]
+    catalog_schema = catalog_operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert catalog_schema["items"] == {"$ref": "#/components/schemas/StrategyDefinition"}
+    assert catalog_schema["type"] == "array"
