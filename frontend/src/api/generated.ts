@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/backtests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Backtests */
+        post: operations["backtests_backtests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/candles": {
         parameters: {
             query?: never;
@@ -110,6 +127,65 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** BacktestRequest */
+        BacktestRequest: {
+            /**
+             * Fees
+             * @default 0
+             */
+            fees: number;
+            /**
+             * Initial Cash
+             * @default 10000
+             */
+            initial_cash: number;
+            /**
+             * Limit
+             * @default 5000
+             */
+            limit: number;
+            /** Parameters */
+            parameters?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Slippage
+             * @default 0
+             */
+            slippage: number;
+            /** Strategy */
+            strategy: string;
+            /** Symbol */
+            symbol: string;
+            /**
+             * Timeframe
+             * @default 1m
+             */
+            timeframe: string;
+        };
+        /** BacktestResponse */
+        BacktestResponse: {
+            /** Candle Count */
+            candle_count: number;
+            /** Final Value */
+            final_value: number;
+            /** Initial Cash */
+            initial_cash: number;
+            /** Max Drawdown */
+            max_drawdown: number;
+            /** Sharpe Ratio */
+            sharpe_ratio: number | null;
+            /** Strategy */
+            strategy: string;
+            /** Symbol */
+            symbol: string;
+            /** Timeframe */
+            timeframe: string;
+            /** Total Return */
+            total_return: number;
+            /** Total Trades */
+            total_trades: number;
+        };
         /** Candle */
         Candle: {
             /** Open */
@@ -171,6 +247,20 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** InvalidStrategyParameters */
+        InvalidStrategyParameters: {
+            /** Detail */
+            detail: string;
+            /** Strategy */
+            strategy: string;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "invalid_strategy_parameters";
+        };
         /** ServiceUnavailable */
         ServiceUnavailable: {
             /** Detail */
@@ -187,6 +277,20 @@ export interface components {
         SymbolCatalog: {
             /** Symbols */
             symbols: string[];
+        };
+        /** UnsupportedStrategy */
+        UnsupportedStrategy: {
+            /** Detail */
+            detail: string;
+            /** Strategy */
+            strategy: string;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "unsupported_strategy";
         };
         /** UnsupportedSymbol */
         UnsupportedSymbol: {
@@ -238,6 +342,57 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    backtests_backtests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestResponse"];
+                };
+            };
+            /** @description The requested analysis inputs are not supported. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnsupportedSymbol"] | components["schemas"]["UnsupportedTimeframe"] | components["schemas"]["UnsupportedStrategy"] | components["schemas"]["InvalidStrategyParameters"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The market source cannot be read. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceUnavailable"];
+                };
+            };
+        };
+    };
     candles_candles_get: {
         parameters: {
             query?: {

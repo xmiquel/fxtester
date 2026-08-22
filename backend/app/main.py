@@ -10,6 +10,17 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.features.analysis.contracts import (
+    BacktestRequest,
+    BacktestResponse,
+    InvalidStrategyParameters,
+    UnsupportedStrategy,
+)
+from app.features.analysis.service import AnalysisService
+from app.features.analysis.strategies.registry import (
+    InvalidStrategyParametersError,
+    UnsupportedStrategyError,
+)
 from app.features.candles.window import (
     CANDLE_WINDOW_LIMIT,
     DEFAULT_TIMEFRAME,
@@ -88,7 +99,9 @@ def log_database_event(event: str, **fields: str) -> None:
 
 def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     app = FastAPI(title="Trading Terminal API", version="0.1.0")
-    candle_service = CandleWindowService(repository or DuckDbCandleRepository())
+    effective_repository = repository or DuckDbCandleRepository()
+    candle_service = CandleWindowService(effective_repository)
+    analysis_service = AnalysisService(effective_repository)
 
     @app.middleware("http")
     async def log_market_request(
@@ -96,8 +109,9 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     ) -> Response:
         started_at = perf_counter()
         response = await call_next(request)
-        if request.url.path in {"/candles", "/symbols", "/timeframes"}:
+        if request.url.path in {"/backtests", "/candles", "/symbols", "/timeframes"}:
             path_event = {
+                "/backtests": "backtest_request",
                 "/candles": "candle_request",
                 "/symbols": "symbol_catalog_request",
                 "/timeframes": "timeframes_request",
@@ -176,6 +190,34 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
             },
         )
 
+    @app.exception_handler(UnsupportedStrategyError)
+    async def unsupported_strategy(
+        request: Request, error: UnsupportedStrategyError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "type": "unsupported_strategy",
+                "title": "Unsupported analysis strategy",
+                "detail": str(error),
+                "strategy": error.strategy,
+            },
+        )
+
+    @app.exception_handler(InvalidStrategyParametersError)
+    async def invalid_strategy_parameters(
+        request: Request, error: InvalidStrategyParametersError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "type": "invalid_strategy_parameters",
+                "title": "Invalid analysis strategy parameters",
+                "detail": str(error),
+                "strategy": error.strategy,
+            },
+        )
+
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         candle_service.check_database()
@@ -249,6 +291,29 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     )
     def timeframes() -> list[str]:
         return candle_service.list_timeframes()
+
+    @app.post(
+        "/backtests",
+        response_model=BacktestResponse,
+        responses={
+            400: {
+                "model": (
+                    UnsupportedSymbol
+                    | UnsupportedTimeframe
+                    | UnsupportedStrategy
+                    | InvalidStrategyParameters
+                ),
+                "description": "The requested analysis inputs are not supported.",
+            },
+            503: {
+                "model": ServiceUnavailable,
+                "description": "The market source cannot be read.",
+            },
+        },
+        tags=["analysis"],
+    )
+    def backtests(request: BacktestRequest) -> BacktestResponse:
+        return analysis_service.run(request)
 
     return app
 

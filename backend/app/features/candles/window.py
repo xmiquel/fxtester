@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import duckdb
 from fastapi import HTTPException
@@ -161,39 +162,62 @@ class DuckDbCandleRepository:
         if parsed_timeframe is None:
             raise ValueError(f"Unsupported timeframe: {timeframe}")
 
+        rows, columns = self._read_rows(
+            symbol, parsed_timeframe, limit + 1, cursor=cursor, descending=True
+        )
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        candles = self._map_rows(columns, reversed(rows))
+        next_cursor = (
+            cast(datetime, candles[0]["datetime"]).isoformat()
+            if has_more and candles
+            else None
+        )
+        return CandleWindow(candles=candles, next_cursor=next_cursor, has_more=has_more)
+
+    def read_series(self, symbol: str, timeframe: str, limit: int) -> list[dict[str, object]]:
+        parsed_timeframe = parse_timeframe(timeframe)
+        if parsed_timeframe is None:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+        rows, columns = self._read_rows(
+            symbol, parsed_timeframe, limit, cursor=None, descending=False
+        )
+        return self._map_rows(columns, rows)
+
+    def _read_rows(
+        self,
+        symbol: str,
+        timeframe: ParsedTimeframe,
+        limit: int,
+        *,
+        cursor: datetime | None,
+        descending: bool,
+    ) -> tuple[list[tuple[object, ...]], list[str]]:
+        order = "DESC" if descending else "ASC"
         try:
             # The connection is read-only and the limit is applied by DuckDB.
             with duckdb.connect(str(self.database_path), read_only=True) as connection:
-                if parsed_timeframe.token == DEFAULT_TIMEFRAME:
-                    parameters: list[object] = [symbol]
-                    if cursor is None:
-                        query = f"""
-                            SELECT {SOURCE_COLUMN_SQL}
-                            FROM {SOURCE_TABLE}
-                            WHERE symbol = ?
-                            ORDER BY datetime DESC
-                            LIMIT ?
-                        """  # noqa: S608 - identifiers are module constants
-                    else:
-                        query = f"""
-                            SELECT {SOURCE_COLUMN_SQL}
-                            FROM {SOURCE_TABLE}
-                            WHERE symbol = ? AND datetime < ?
-                            ORDER BY datetime DESC
-                            LIMIT ?
-                        """  # noqa: S608 - identifiers are module constants
-                        parameters.append(cursor)
+                parameters: list[object] = [symbol]
+                where_clause = "WHERE symbol = ?"
+                if cursor is not None:
+                    where_clause += " AND datetime < ?"
+                    parameters.append(cursor)
+
+                if timeframe.token == DEFAULT_TIMEFRAME:
+                    query = f"""
+                        SELECT {SOURCE_COLUMN_SQL}
+                        FROM {SOURCE_TABLE}
+                        {where_clause}
+                        ORDER BY datetime {order}
+                        LIMIT ?
+                    """  # noqa: S608 - identifiers and order are constants
                 else:
-                    bucket_seconds = parsed_timeframe.bucket_seconds
+                    bucket_seconds = timeframe.bucket_seconds
                     bucket_expression = f"""TIMESTAMP 'epoch' + (
                             CAST(FLOOR(EXTRACT(epoch FROM datetime)) AS BIGINT)
                             // {bucket_seconds} * {bucket_seconds}
                           ) * INTERVAL '1 second'"""
-                    parameters = [symbol]
-                    where_clause = "WHERE symbol = ?"
-                    if cursor is not None:
-                        where_clause = "WHERE symbol = ? AND datetime < ?"
-                        parameters.append(cursor)
                     query = f"""
                         SELECT
                           {bucket_expression} AS datetime,
@@ -208,27 +232,28 @@ class DuckDbCandleRepository:
                         FROM {SOURCE_TABLE}
                         {where_clause}
                         GROUP BY {bucket_expression}, symbol
-                        ORDER BY {bucket_expression} DESC
+                        ORDER BY {bucket_expression} {order}
                         LIMIT ?
-                    """  # noqa: S608 - identifiers are module constants
-                parameters.append(limit + 1)
+                    """  # noqa: S608 - identifiers and order are constants
+                parameters.append(limit)
                 rows = connection.execute(query, parameters).fetchall()
                 columns = [column[0] for column in connection.description]
         except (duckdb.Error, OSError) as error:
             raise DatabaseUnavailable("market database is unavailable") from error
+        return rows, columns
 
-        has_more = len(rows) > limit
-        rows = rows[:limit]
-        source_rows = [dict(zip(columns, row, strict=True)) for row in reversed(rows)]
-        candles = [
+    @staticmethod
+    def _map_rows(
+        columns: list[str], rows: Iterable[tuple[object, ...]]
+    ) -> list[dict[str, object]]:
+        source_rows = [dict(zip(columns, row, strict=True)) for row in rows]
+        return [
             {
                 contract_field: source_row[source_field]
                 for source_field, contract_field in SOURCE_TO_CONTRACT_FIELDS
             }
             for source_row in source_rows
         ]
-        next_cursor = candles[0]["datetime"].isoformat() if has_more and candles else None
-        return CandleWindow(candles=candles, next_cursor=next_cursor, has_more=has_more)
 
     def list_symbols(self) -> list[str]:
         try:
