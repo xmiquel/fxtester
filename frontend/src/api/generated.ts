@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/backtests/strategies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Backtest Strategies */
+        get: operations["backtest_strategies_backtests_strategies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/candles": {
         parameters: {
             query?: never;
@@ -167,6 +184,8 @@ export interface components {
         BacktestResponse: {
             /** Candle Count */
             candle_count: number;
+            /** End Datetime */
+            end_datetime: string | null;
             /** Final Value */
             final_value: number;
             /** Initial Cash */
@@ -175,6 +194,8 @@ export interface components {
             max_drawdown: number;
             /** Sharpe Ratio */
             sharpe_ratio: number | null;
+            /** Start Datetime */
+            start_datetime: string | null;
             /** Strategy */
             strategy: string;
             /** Symbol */
@@ -272,6 +293,35 @@ export interface components {
              * @constant
              */
             type: "service_unavailable";
+        };
+        /** StrategyDefinition */
+        StrategyDefinition: {
+            /** Description */
+            description: string;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /** Parameters */
+            parameters: components["schemas"]["StrategyParameterDefinition"][];
+        };
+        /** StrategyParameterDefinition */
+        StrategyParameterDefinition: {
+            /** Default */
+            default: number | boolean | string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "integer" | "number" | "boolean" | "string";
+            /** Label */
+            label: string;
+            /** Maximum */
+            maximum?: number | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Name */
+            name: string;
         };
         /** SymbolCatalog */
         SymbolCatalog: {
@@ -389,6 +439,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServiceUnavailable"];
+                };
+            };
+        };
+    };
+    backtest_strategies_backtests_strategies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyDefinition"][];
                 };
             };
         };

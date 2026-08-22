@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from app.features.analysis.strategies.base import Strategy
+from app.features.analysis.strategies.base import Strategy, StrategyDefinition
 from app.features.analysis.strategies.sma_cross import SmaCrossStrategy
 
 
@@ -26,6 +26,9 @@ class StrategyRegistry:
         if strategy is None:
             raise UnsupportedStrategyError(name)
         return strategy
+
+    def list_definitions(self) -> list[StrategyDefinition]:
+        return [strategy.definition for strategy in self._strategies.values()]
 
     def validate_parameters(
         self, name: str, parameters: Mapping[str, object]

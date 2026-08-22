@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -22,6 +23,8 @@ class BacktestResponse(BaseModel):
     symbol: str
     timeframe: str
     strategy: str
+    start_datetime: datetime | None
+    end_datetime: datetime | None
     candle_count: int
     initial_cash: float
     final_value: float
@@ -29,6 +32,22 @@ class BacktestResponse(BaseModel):
     max_drawdown: float
     sharpe_ratio: float | None
     total_trades: int
+
+
+class StrategyParameterDefinition(BaseModel):
+    name: str
+    label: str
+    kind: Literal["integer", "number", "boolean", "string"]
+    default: int | float | bool | str
+    minimum: int | float | None = None
+    maximum: int | float | None = None
+
+
+class StrategyDefinition(BaseModel):
+    name: str
+    label: str
+    description: str
+    parameters: list[StrategyParameterDefinition]
 
 
 class UnsupportedStrategy(BaseModel):

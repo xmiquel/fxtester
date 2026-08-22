@@ -66,6 +66,18 @@
             "title": "Candle Count",
             "type": "integer"
           },
+          "end_datetime": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Datetime"
+          },
           "final_value": {
             "title": "Final Value",
             "type": "number"
@@ -88,6 +100,18 @@
               }
             ],
             "title": "Sharpe Ratio"
+          },
+          "start_datetime": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Datetime"
           },
           "strategy": {
             "title": "Strategy",
@@ -114,6 +138,8 @@
           "symbol",
           "timeframe",
           "strategy",
+          "start_datetime",
+          "end_datetime",
           "candle_count",
           "initial_cash",
           "final_value",
@@ -327,6 +353,112 @@
           "detail"
         ],
         "title": "ServiceUnavailable",
+        "type": "object"
+      },
+      "StrategyDefinition": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyParameterDefinition"
+            },
+            "title": "Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "description",
+          "parameters"
+        ],
+        "title": "StrategyDefinition",
+        "type": "object"
+      },
+      "StrategyParameterDefinition": {
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Default"
+          },
+          "kind": {
+            "enum": [
+              "integer",
+              "number",
+              "boolean",
+              "string"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "kind",
+          "default"
+        ],
+        "title": "StrategyParameterDefinition",
         "type": "object"
       },
       "SymbolCatalog": {
@@ -557,6 +689,31 @@
           }
         },
         "summary": "Backtests",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
+    "/backtests/strategies": {
+      "get": {
+        "operationId": "backtest_strategies_backtests_strategies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StrategyDefinition"
+                  },
+                  "title": "Response Backtest Strategies Backtests Strategies Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Backtest Strategies",
         "tags": [
           "analysis"
         ]

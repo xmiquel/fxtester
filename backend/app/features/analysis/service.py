@@ -1,9 +1,15 @@
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Protocol, cast
 
 import pandas as pd  # type: ignore[import-untyped]
 
-from app.features.analysis.contracts import BacktestRequest, BacktestResponse
+from app.features.analysis.contracts import (
+    BacktestRequest,
+    BacktestResponse,
+    StrategyDefinition,
+    StrategyParameterDefinition,
+)
 from app.features.analysis.strategies.registry import StrategyRegistry
 from app.features.candles.window import (
     UnsupportedSymbolError,
@@ -58,6 +64,8 @@ class AnalysisService:
             symbol=request.symbol,
             timeframe=parsed_timeframe.token,
             strategy=request.strategy,
+            start_datetime=cast(datetime, candles[0]["datetime"]) if candles else None,
+            end_datetime=cast(datetime, candles[-1]["datetime"]) if candles else None,
             candle_count=len(candles),
             initial_cash=request.initial_cash,
             final_value=result.final_value,
@@ -66,3 +74,24 @@ class AnalysisService:
             sharpe_ratio=result.sharpe_ratio,
             total_trades=result.total_trades,
         )
+
+    def list_strategies(self) -> list[StrategyDefinition]:
+        return [
+            StrategyDefinition(
+                name=definition.name,
+                label=definition.label,
+                description=definition.description,
+                parameters=[
+                    StrategyParameterDefinition(
+                        name=parameter.name,
+                        label=parameter.label,
+                        kind=parameter.kind,
+                        default=parameter.default,
+                        minimum=parameter.minimum,
+                        maximum=parameter.maximum,
+                    )
+                    for parameter in definition.parameters
+                ],
+            )
+            for definition in self.registry.list_definitions()
+        ]

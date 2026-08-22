@@ -14,6 +14,7 @@ from app.features.analysis.contracts import (
     BacktestRequest,
     BacktestResponse,
     InvalidStrategyParameters,
+    StrategyDefinition,
     UnsupportedStrategy,
 )
 from app.features.analysis.service import AnalysisService
@@ -109,9 +110,16 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     ) -> Response:
         started_at = perf_counter()
         response = await call_next(request)
-        if request.url.path in {"/backtests", "/candles", "/symbols", "/timeframes"}:
+        if request.url.path in {
+            "/backtests",
+            "/backtests/strategies",
+            "/candles",
+            "/symbols",
+            "/timeframes",
+        }:
             path_event = {
                 "/backtests": "backtest_request",
+                "/backtests/strategies": "backtest_strategy_catalog_request",
                 "/candles": "candle_request",
                 "/symbols": "symbol_catalog_request",
                 "/timeframes": "timeframes_request",
@@ -291,6 +299,14 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     )
     def timeframes() -> list[str]:
         return candle_service.list_timeframes()
+
+    @app.get(
+        "/backtests/strategies",
+        response_model=list[StrategyDefinition],
+        tags=["analysis"],
+    )
+    def backtest_strategies() -> list[StrategyDefinition]:
+        return analysis_service.list_strategies()
 
     @app.post(
         "/backtests",
