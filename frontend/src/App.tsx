@@ -4,7 +4,8 @@ import { CandlestickChart } from "./features/candles/CandlestickChart";
 import { SymbolSelector } from "./features/candles/SymbolSelector";
 import { TimeframeSelector } from "./features/candles/TimeframeSelector";
 import { useSymbols } from "./features/candles/useSymbols";
-import { useTimeframes } from "./features/candles/useTimeframes";
+import { useTimeframeKeyboard } from "./features/candles/useTimeframeKeyboard";
+import { timeframePolicy, useTimeframes } from "./features/candles/useTimeframes";
 
 export function App() {
   const symbolsQuery = useSymbols();
@@ -12,6 +13,9 @@ export function App() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>("1m");
   const symbols = symbolsQuery.data?.symbols;
+  const timeframes = timeframesQuery.data ?? timeframePolicy.fallback;
+
+  useTimeframeKeyboard(setSelectedTimeframe);
 
   useEffect(() => {
     if (symbols && symbols.length > 0) {
@@ -42,7 +46,7 @@ export function App() {
         <TimeframeSelector
           onSelect={setSelectedTimeframe}
           selectedTimeframe={selectedTimeframe}
-          timeframes={timeframesQuery.data ?? ["1m", "5m", "15m", "1h"]}
+          timeframes={timeframes}
         />
         <CandlestickChart symbol={selectedSymbol} timeframe={selectedTimeframe} />
       </>

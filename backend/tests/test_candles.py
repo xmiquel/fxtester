@@ -102,12 +102,12 @@ def expected_aggregated_candles(
     source: list[tuple[datetime, float, float, float, float, int, int]], bucket_minutes: int
 ) -> list[AggregatedCandle]:
     buckets: dict[datetime, list[tuple[datetime, float, float, float, float, int, int]]] = {}
+    epoch = datetime(1970, 1, 1)
+    bucket = timedelta(minutes=bucket_minutes)
     for row in source:
         datetime_value = row[0]
-        bucket = datetime_value.replace(
-            minute=datetime_value.minute // bucket_minutes * bucket_minutes
-        )
-        buckets.setdefault(bucket, []).append(row)
+        bucket_start = epoch + ((datetime_value - epoch) // bucket) * bucket
+        buckets.setdefault(bucket_start, []).append(row)
 
     return [
         {
@@ -288,23 +288,27 @@ def test_openapi_documents_invalid_candle_parameters(tmp_path: Path) -> None:
     )
 
 
-def test_only_one_minute_timeframe_is_exposed(tmp_path: Path) -> None:
+@pytest.mark.parametrize("timeframe", ["0m", "1.5h", "-1m", "1d", "1", "m", "01m"])
+def test_invalid_timeframe_is_rejected(tmp_path: Path, timeframe: str) -> None:
     database = tmp_path / "market.duckdb"
     make_database(str(database), count=1)
     client = TestClient(create_app(DuckDbCandleRepository(database)))
 
-    response = client.get("/candles", params={"symbol": "NDX", "timeframe": "2m"})
+    response = client.get("/candles", params={"symbol": "NDX", "timeframe": timeframe})
 
     assert response.status_code == 400
     assert response.json() == {
         "type": "unsupported_timeframe",
         "title": "Unsupported candle timeframe",
-        "detail": "Unsupported timeframe '2m'. Supported: ['1m', '5m', '15m', '1h']",
-        "timeframe": "2m",
+        "detail": (
+            f"Unsupported timeframe '{timeframe}'. "
+            "Expected a positive integer followed by 'm' or 'h'."
+        ),
+        "timeframe": timeframe,
     }
 
 
-@pytest.mark.parametrize("timeframe", ["1m", "5m", "15m", "1h"])
+@pytest.mark.parametrize("timeframe", ["1m", "2m", "5m", "15m", "1h"])
 def test_supported_timeframes_return_200(tmp_path: Path, timeframe: str) -> None:
     database = tmp_path / "market.duckdb"
     # Insert enough 1m rows (at least 60 for 1h aggregation)
@@ -326,9 +330,24 @@ def test_supported_timeframes_return_200(tmp_path: Path, timeframe: str) -> None
         assert candle["symbol"] == "NDX"
 
 
+def test_custom_timeframe_is_case_insensitive_and_canonicalized(tmp_path: Path) -> None:
+    database = tmp_path / "market.duckdb"
+    source = make_aggregation_database(str(database))
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.get("/candles", params={"symbol": "NDX", "timeframe": "3H"})
+
+    assert response.status_code == 200
+    assert response.json()["timeframe"] == "3h"
+    expected = expected_aggregated_candles(source, 180)
+    assert [candle["datetime"] for candle in response.json()["candles"]] == [
+        candle["datetime"] for candle in expected
+    ]
+
+
 @pytest.mark.parametrize(
     ("timeframe", "bucket_minutes"),
-    [("5m", 5), ("15m", 15), ("1h", 60)],
+    [("2m", 2), ("5m", 5), ("15m", 15), ("1h", 60), ("3h", 180)],
 )
 def test_non_one_minute_timeframes_aggregate_epoch_floor_buckets(
     tmp_path: Path, timeframe: str, bucket_minutes: int
@@ -390,7 +409,7 @@ def test_fractional_timestamp_before_boundary_stays_in_prior_bucket(tmp_path: Pa
 
 @pytest.mark.parametrize(
     ("timeframe", "bucket_minutes"),
-    [("5m", 5), ("15m", 15), ("1h", 60)],
+    [("2m", 2), ("5m", 5), ("15m", 15), ("1h", 60), ("3h", 180)],
 )
 def test_non_one_minute_timeframe_cursor_pages_are_adjacent_and_complete(
     tmp_path: Path, timeframe: str, bucket_minutes: int
@@ -425,11 +444,11 @@ def test_non_one_minute_timeframe_cursor_pages_are_adjacent_and_complete(
 
 
 @pytest.mark.parametrize(
-    ("timeframe", "bucket_minutes"),
-    [("5m", 5), ("15m", 15), ("1h", 60)],
+    ("timeframe", "bucket_minutes", "cursor_offset_minutes"),
+    [("2m", 2, 1), ("5m", 5, 2), ("15m", 15, 2), ("1h", 60, 2)],
 )
 def test_non_one_minute_intra_bucket_cursor_returns_complete_prior_buckets(
-    tmp_path: Path, timeframe: str, bucket_minutes: int
+    tmp_path: Path, timeframe: str, bucket_minutes: int, cursor_offset_minutes: int
 ) -> None:
     database = tmp_path / "market.duckdb"
     source = make_aggregation_database(str(database))
@@ -440,7 +459,7 @@ def test_non_one_minute_intra_bucket_cursor_returns_complete_prior_buckets(
         for candle in expected_aggregated_candles(source, bucket_minutes)
         if candle["datetime"] < bucket_start.isoformat()
     ]
-    cursor = (bucket_start + timedelta(minutes=2)).isoformat()
+    cursor = (bucket_start + timedelta(minutes=cursor_offset_minutes)).isoformat()
     paged_candles: list[dict[str, object]] = []
 
     while True:
@@ -472,17 +491,21 @@ def test_non_one_minute_intra_bucket_cursor_returns_complete_prior_buckets(
 
 
 @pytest.mark.parametrize(
-    ("timeframe", "cursor", "expected_bucket_start"),
+    ("timeframe", "bucket_seconds", "cursor", "expected_bucket_start"),
     [
-        ("5m", "2025-01-01T03:02:00+01:00", datetime(2025, 1, 1, 2, 0)),
-        ("15m", "2025-01-01T04:17:00+02:00", datetime(2025, 1, 1, 2, 15)),
-        ("1h", "2024-12-31T23:43:00-03:00", datetime(2025, 1, 1, 2, 0)),
+        ("2m", 120, "2025-01-01T03:01:00+01:00", datetime(2025, 1, 1, 2, 0)),
+        ("5m", 300, "2025-01-01T03:02:00+01:00", datetime(2025, 1, 1, 2, 0)),
+        ("15m", 900, "2025-01-01T04:17:00+02:00", datetime(2025, 1, 1, 2, 15)),
+        ("1h", 3600, "2024-12-31T23:43:00-03:00", datetime(2025, 1, 1, 2, 0)),
+        ("3h", 10800, "2025-01-01T04:02:00+01:00", datetime(2025, 1, 1, 3, 0)),
     ],
 )
 def test_offset_cursor_is_normalized_to_utc_bucket_start(
-    timeframe: str, cursor: str, expected_bucket_start: datetime
+    timeframe: str, bucket_seconds: int, cursor: str, expected_bucket_start: datetime
 ) -> None:
-    actual_bucket_start = normalize_cursor_to_bucket(datetime.fromisoformat(cursor), timeframe)
+    actual_bucket_start = normalize_cursor_to_bucket(
+        datetime.fromisoformat(cursor), bucket_seconds
+    )
 
     assert actual_bucket_start == expected_bucket_start
 
@@ -490,9 +513,11 @@ def test_offset_cursor_is_normalized_to_utc_bucket_start(
 @pytest.mark.parametrize(
     ("timeframe", "bucket_minutes", "cursor", "expected_bucket_start"),
     [
+        ("2m", 2, "2025-01-01T03:01:00+01:00", datetime(2025, 1, 1, 2, 0)),
         ("5m", 5, "2025-01-01T03:02:00+01:00", datetime(2025, 1, 1, 2, 0)),
         ("15m", 15, "2025-01-01T04:17:00+02:00", datetime(2025, 1, 1, 2, 15)),
         ("1h", 60, "2024-12-31T23:43:00-03:00", datetime(2025, 1, 1, 2, 0)),
+        ("3h", 180, "2025-01-01T04:02:00+01:00", datetime(2025, 1, 1, 3, 0)),
     ],
 )
 def test_offset_intra_bucket_cursor_returns_complete_non_overlapping_pages(
@@ -582,7 +607,7 @@ def test_timeframes_endpoint(tmp_path: Path) -> None:
     response = client.get("/timeframes")
 
     assert response.status_code == 200
-    assert response.json() == ["1m", "5m", "15m", "1h"]
+    assert response.json() == ["1m", "2m", "5m", "15m", "1h"]
 
 
 def test_cursor_windows_are_ordered_and_non_overlapping(tmp_path: Path) -> None:

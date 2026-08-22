@@ -39,7 +39,7 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ contentType: "application/json", body: JSON.stringify({ symbols: ["NDX", "SPX"] }) }),
   );
   await page.route("**/api/timeframes", (route) =>
-    route.fulfill({ contentType: "application/json", body: JSON.stringify(["1m", "5m", "15m", "1h"]) }),
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(["1m", "2m", "5m", "15m", "1h"]) }),
   );
 });
 
