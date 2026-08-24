@@ -9,9 +9,8 @@ import type {
   StrategyParameterDefinition,
 } from "./api";
 import { useBacktestStrategies } from "./useBacktestStrategies";
+import { useBacktestPeriod } from "./useBacktestPeriod";
 import { useRunBacktest } from "./useRunBacktest";
-
-export const BACKTEST_PERIODS = [500, 1000, 5000] as const;
 
 type ParameterValue = StrategyParameterDefinition["default"];
 
@@ -54,6 +53,10 @@ function formatPercent(value: number): string {
 
 function formatDateTime(value: string | null): string {
   return value ?? "Unavailable";
+}
+
+function toDateTimeLocal(value: string): string {
+  return value.slice(0, 16);
 }
 
 function strategyFor(
@@ -148,13 +151,30 @@ export function BacktestPage({
   onSelectTimeframe,
 }: BacktestPageProps) {
   const strategiesQuery = useBacktestStrategies();
+  const periodQuery = useBacktestPeriod(selectedSymbol, selectedTimeframe);
   const runBacktest = useRunBacktest();
+  const resetBacktest = runBacktest.reset;
   const [selectedStrategy, setSelectedStrategy] = useState("");
-  const [period, setPeriod] = useState<number>(BACKTEST_PERIODS[0]);
+  const [startDatetime, setStartDatetime] = useState("");
+  const [endDatetime, setEndDatetime] = useState("");
   const [parameters, setParameters] = useState<Record<string, ParameterValue>>({});
   const [validationError, setValidationError] = useState<string | null>(null);
   const [lastRequest, setLastRequest] = useState<BacktestRequest | null>(null);
   const selectedDefinition = strategyFor(strategiesQuery.data, selectedStrategy);
+
+  useEffect(() => {
+    setStartDatetime("");
+    setEndDatetime("");
+    setValidationError(null);
+    resetBacktest();
+  }, [resetBacktest, selectedSymbol, selectedTimeframe]);
+
+  useEffect(() => {
+    if (periodQuery.data) {
+      setStartDatetime(toDateTimeLocal(periodQuery.data.start_datetime));
+      setEndDatetime(toDateTimeLocal(periodQuery.data.end_datetime));
+    }
+  }, [periodQuery.data]);
 
   useEffect(() => {
     const firstStrategy = strategiesQuery.data?.[0];
@@ -184,6 +204,14 @@ export function BacktestPage({
       setValidationError("Select a strategy before running the backtest.");
       return;
     }
+    if (!periodQuery.data || !startDatetime || !endDatetime) {
+      setValidationError("Wait for the available backtest period before running the backtest.");
+      return;
+    }
+    if (startDatetime > endDatetime) {
+      setValidationError("Start date must be before or equal to end date.");
+      return;
+    }
     if (!event.currentTarget.checkValidity()) {
       setValidationError("Review the strategy parameters before running the backtest.");
       return;
@@ -191,10 +219,11 @@ export function BacktestPage({
 
     setValidationError(null);
     const request: BacktestRequest = {
-      fees: 0,
-      initial_cash: 10000,
-      limit: period,
-      parameters,
+        fees: 0,
+        initial_cash: 10000,
+        start_datetime: startDatetime,
+        end_datetime: endDatetime,
+        parameters,
       slippage: 0,
       strategy: selectedDefinition.name,
       symbol: selectedSymbol,
@@ -220,13 +249,29 @@ export function BacktestPage({
   if (!strategiesQuery.data || strategiesQuery.data.length === 0) {
     return <p role="status">No backtest strategies are registered.</p>;
   }
+  if (periodQuery.isPending || periodQuery.isFetching) {
+    return <p role="status">Loading available backtest period…</p>;
+  }
+  if (periodQuery.isError) {
+    return (
+      <div role="alert">
+        <p>{periodQuery.error.message}</p>
+        <button onClick={() => void periodQuery.refetch()} type="button">
+          Retry loading backtest period
+        </button>
+      </div>
+    );
+  }
+  if (!periodQuery.data) {
+    return <p role="status">No available backtest period was found.</p>;
+  }
 
   return (
     <section aria-labelledby="backtest-title" className="workspace-panel">
       <header className="backtest-header">
         <p className="eyebrow">Historical analysis</p>
         <h2 id="backtest-title">Backtest a strategy</h2>
-        <p>Select market context, strategy inputs, and a bounded candle window to evaluate historical performance.</p>
+          <p>Select market context, strategy inputs, and a date range to evaluate historical performance.</p>
       </header>
       <form className="backtest-form" onSubmit={submit}>
         <div className="form-grid">
@@ -253,19 +298,33 @@ export function BacktestPage({
               ))}
             </select>
           </label>
-          <label htmlFor="evaluation-period-selector">
-            Evaluation period/window
-            <select
-              id="evaluation-period-selector"
-              onChange={(event) => setPeriod(Number(event.target.value))}
-              value={period}
-            >
-              {BACKTEST_PERIODS.map((preset) => (
-                <option key={preset} value={preset}>
-                  {preset.toLocaleString("en-US")} candles
-                </option>
-              ))}
-            </select>
+          <label htmlFor="backtest-start-datetime">
+            Start date
+            <input
+              id="backtest-start-datetime"
+              max={toDateTimeLocal(periodQuery.data.end_datetime)}
+              min={toDateTimeLocal(periodQuery.data.start_datetime)}
+              name="start_datetime"
+              onChange={(event) => setStartDatetime(event.target.value)}
+              required
+              step="1"
+              type="datetime-local"
+              value={startDatetime}
+            />
+          </label>
+          <label htmlFor="backtest-end-datetime">
+            End date
+            <input
+              id="backtest-end-datetime"
+              max={toDateTimeLocal(periodQuery.data.end_datetime)}
+              min={toDateTimeLocal(periodQuery.data.start_datetime)}
+              name="end_datetime"
+              onChange={(event) => setEndDatetime(event.target.value)}
+              required
+              step="1"
+              type="datetime-local"
+              value={endDatetime}
+            />
           </label>
         </div>
         {selectedDefinition && (
@@ -301,7 +360,10 @@ export function BacktestPage({
           </div>
         )}
         <div className="button-row">
-          <button disabled={runBacktest.isPending} type="submit">
+          <button
+            disabled={runBacktest.isPending || periodQuery.isFetching || !periodQuery.data}
+            type="submit"
+          >
             {runBacktest.isPending ? "Running backtest…" : "Run backtest"}
           </button>
         </div>

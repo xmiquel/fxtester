@@ -11,13 +11,20 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.features.analysis.contracts import (
+    BacktestPeriod,
+    BacktestPeriodEmpty,
     BacktestRequest,
     BacktestResponse,
+    InvalidBacktestPeriod,
     InvalidStrategyParameters,
     StrategyDefinition,
     UnsupportedStrategy,
 )
-from app.features.analysis.service import AnalysisService
+from app.features.analysis.service import (
+    AnalysisService,
+    BacktestPeriodEmptyError,
+    InvalidBacktestPeriodError,
+)
 from app.features.analysis.strategies.registry import (
     InvalidStrategyParametersError,
     UnsupportedStrategyError,
@@ -113,6 +120,7 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
         if request.url.path in {
             "/backtests",
             "/backtests/strategies",
+            "/backtests/period",
             "/candles",
             "/symbols",
             "/timeframes",
@@ -120,6 +128,7 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
             path_event = {
                 "/backtests": "backtest_request",
                 "/backtests/strategies": "backtest_strategy_catalog_request",
+                "/backtests/period": "backtest_period_request",
                 "/candles": "candle_request",
                 "/symbols": "symbol_catalog_request",
                 "/timeframes": "timeframes_request",
@@ -226,6 +235,32 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
             },
         )
 
+    @app.exception_handler(InvalidBacktestPeriodError)
+    async def invalid_backtest_period(
+        request: Request, error: InvalidBacktestPeriodError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "type": "invalid_backtest_period",
+                "title": "Invalid backtest period",
+                "detail": str(error),
+            },
+        )
+
+    @app.exception_handler(BacktestPeriodEmptyError)
+    async def backtest_period_empty(
+        request: Request, error: BacktestPeriodEmptyError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "type": "backtest_period_empty",
+                "title": "Backtest period is empty",
+                "detail": str(error),
+            },
+        )
+
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         candle_service.check_database()
@@ -308,6 +343,25 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
     def backtest_strategies() -> list[StrategyDefinition]:
         return analysis_service.list_strategies()
 
+    @app.get(
+        "/backtests/period",
+        response_model=BacktestPeriod,
+        responses={
+            400: {
+                "model": UnsupportedSymbol | UnsupportedTimeframe | BacktestPeriodEmpty,
+                "description": "The requested symbol or timeframe has no available analysis data.",
+            },
+            503: {
+                "model": ServiceUnavailable,
+                "description": "The market source cannot be read.",
+            },
+        },
+        tags=["analysis"],
+    )
+    def backtest_period(symbol: str, timeframe: str = DEFAULT_TIMEFRAME) -> BacktestPeriod:
+        start_datetime, end_datetime = analysis_service.get_period(symbol, timeframe)
+        return BacktestPeriod(start_datetime=start_datetime, end_datetime=end_datetime)
+
     @app.post(
         "/backtests",
         response_model=BacktestResponse,
@@ -318,6 +372,8 @@ def create_app(repository: DuckDbCandleRepository | None = None) -> FastAPI:
                     | UnsupportedTimeframe
                     | UnsupportedStrategy
                     | InvalidStrategyParameters
+                    | InvalidBacktestPeriod
+                    | BacktestPeriodEmpty
                 ),
                 "description": "The requested analysis inputs are not supported.",
             },

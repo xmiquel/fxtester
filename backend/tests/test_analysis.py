@@ -5,7 +5,8 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
-from app.features.analysis.service import candles_to_close_series
+from app.features.analysis.contracts import BacktestRequest
+from app.features.analysis.service import AnalysisService, candles_to_close_series
 from app.features.analysis.strategies.registry import (
     InvalidStrategyParametersError,
     StrategyRegistry,
@@ -15,7 +16,7 @@ from app.features.candles.window import DuckDbCandleRepository
 from app.main import create_app
 
 
-def make_analysis_database(path: Path) -> None:
+def make_analysis_database(path: Path, row_count: int = 10) -> None:
     connection = duckdb.connect(str(path))
     connection.execute(
         '''CREATE TABLE dt_ohlc_m1 (
@@ -30,17 +31,17 @@ def make_analysis_database(path: Path) -> None:
         (
             start + timedelta(minutes=index),
             "NDX",
-            close,
-            close + 1,
-            close - 1,
-            close,
+            closes[index % len(closes)],
+            closes[index % len(closes)] + 1,
+            closes[index % len(closes)] - 1,
+            closes[index % len(closes)],
             index,
             index,
             1,
             "test",
             start,
         )
-        for index, close in enumerate(closes)
+        for index in range(row_count)
     ]
     connection.executemany("INSERT INTO dt_ohlc_m1 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
     connection.close()
@@ -51,6 +52,41 @@ def analysis_client(tmp_path: Path) -> TestClient:
     database = tmp_path / "market.duckdb"
     make_analysis_database(database)
     return TestClient(create_app(DuckDbCandleRepository(database)))
+
+
+def backtest_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "symbol": "NDX",
+        "strategy": "sma_cross",
+        "start_datetime": "2025-01-01T00:00:00",
+        "end_datetime": "2025-01-01T00:09:00",
+    }
+    payload.update(overrides)
+    return payload
+
+
+class ReportedLargeCandleList(list[dict[str, object]]):
+    def __len__(self) -> int:
+        return 250_001
+
+
+class LargeRangeAnalysisRepository:
+    def list_symbols(self) -> list[str]:
+        return ["NDX"]
+
+    def read_series(
+        self, symbol: str, timeframe: str, start_datetime: datetime, end_datetime: datetime
+    ) -> list[dict[str, object]]:
+        return ReportedLargeCandleList(
+            [
+                {"datetime": start_datetime, "close": 100.0},
+                {"datetime": start_datetime + timedelta(minutes=1), "close": 101.0},
+                {"datetime": end_datetime, "close": 102.0},
+            ]
+        )
+
+    def read_bounds(self, symbol: str, timeframe: str) -> tuple[datetime, datetime]:
+        return datetime(2025, 1, 1), datetime(2025, 1, 1, 0, 9)
 
 
 def test_strategy_registry_validates_sma_cross_parameters() -> None:
@@ -85,7 +121,12 @@ def test_analysis_series_is_bounded_chronological_and_aggregated(tmp_path: Path)
     database = tmp_path / "market.duckdb"
     make_analysis_database(database)
 
-    candles = DuckDbCandleRepository(database).read_series("NDX", "5m", 2)
+    candles = DuckDbCandleRepository(database).read_series(
+        "NDX",
+        "5m",
+        datetime(2025, 1, 1, 0, 0),
+        datetime(2025, 1, 1, 0, 9),
+    )
 
     assert len(candles) == 2
     assert [candle["datetime"] for candle in candles] == [
@@ -95,13 +136,26 @@ def test_analysis_series_is_bounded_chronological_and_aggregated(tmp_path: Path)
     assert [candle["close"] for candle in candles] == [101.0, 101.0]
 
 
+def test_analysis_aggregation_range_uses_inclusive_bucket_boundaries(tmp_path: Path) -> None:
+    database = tmp_path / "market.duckdb"
+    make_analysis_database(database)
+
+    candles = DuckDbCandleRepository(database).read_series(
+        "NDX",
+        "5m",
+        datetime(2025, 1, 1, 0, 5),
+        datetime(2025, 1, 1, 0, 5),
+    )
+
+    assert [candle["datetime"] for candle in candles] == [datetime(2025, 1, 1, 0, 5)]
+    assert [candle["close"] for candle in candles] == [101.0]
+
+
 def test_backtest_result_is_deterministic_and_typed(analysis_client: TestClient) -> None:
     payload = {
-        "symbol": "NDX",
+        **backtest_payload(),
         "timeframe": "1M",
-        "strategy": "sma_cross",
         "parameters": {"fast_window": 2, "slow_window": 3},
-        "limit": 10,
         "initial_cash": 1000.0,
         "fees": 0.001,
         "slippage": 0.001,
@@ -136,13 +190,130 @@ def test_backtest_result_is_deterministic_and_typed(analysis_client: TestClient)
     assert body["total_trades"] == 2
 
 
+def test_backtest_range_is_inclusive(analysis_client: TestClient) -> None:
+    response = analysis_client.post(
+        "/backtests",
+        json=backtest_payload(
+            start_datetime="2025-01-01T00:02:00",
+            end_datetime="2025-01-01T00:04:00",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["start_datetime"] == "2025-01-01T00:02:00"
+    assert response.json()["end_datetime"] == "2025-01-01T00:04:00"
+    assert response.json()["candle_count"] == 3
+
+
+def test_backtest_dates_are_required(analysis_client: TestClient) -> None:
+    response = analysis_client.post(
+        "/backtests", json={"symbol": "NDX", "strategy": "sma_cross"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_backtest_normalizes_timezone_aware_ranges_to_utc_naive(
+    analysis_client: TestClient,
+) -> None:
+    response = analysis_client.post(
+        "/backtests",
+        json=backtest_payload(
+            start_datetime="2024-12-31T19:00:00-05:00",
+            end_datetime="2024-12-31T19:09:00-05:00",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["start_datetime"] == "2025-01-01T00:00:00"
+    assert response.json()["end_datetime"] == "2025-01-01T00:09:00"
+
+
+def test_empty_backtest_range_is_a_typed_400(analysis_client: TestClient) -> None:
+    response = analysis_client.post(
+        "/backtests",
+        json=backtest_payload(
+            start_datetime="2025-01-02T00:00:00",
+            end_datetime="2025-01-02T00:01:00",
+        ),
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "type": "backtest_period_empty",
+        "title": "Backtest period is empty",
+        "detail": "No candle exists in the requested backtest period.",
+    }
+
+
+def test_reversed_backtest_range_is_a_typed_400(analysis_client: TestClient) -> None:
+    response = analysis_client.post(
+        "/backtests",
+        json=backtest_payload(
+            start_datetime="2025-01-01T00:05:00",
+            end_datetime="2025-01-01T00:04:00",
+        ),
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "type": "invalid_backtest_period",
+        "title": "Invalid backtest period",
+        "detail": "start_datetime must be less than or equal to end_datetime",
+    }
+
+
+def test_backtest_service_accepts_a_range_larger_than_the_previous_limit() -> None:
+    response = AnalysisService(LargeRangeAnalysisRepository()).run(
+        BacktestRequest(**backtest_payload())
+    )
+
+    assert response.candle_count == 250_001
+
+
+def test_backtest_period_endpoint_returns_timeframe_aware_bounds(
+    analysis_client: TestClient,
+) -> None:
+    one_minute = analysis_client.get(
+        "/backtests/period", params={"symbol": "NDX", "timeframe": "1m"}
+    )
+    five_minutes = analysis_client.get(
+        "/backtests/period", params={"symbol": "NDX", "timeframe": "5m"}
+    )
+
+    assert one_minute.status_code == 200
+    assert one_minute.json() == {
+        "start_datetime": "2025-01-01T00:00:00",
+        "end_datetime": "2025-01-01T00:09:00",
+    }
+    assert five_minutes.status_code == 200
+    assert five_minutes.json() == {
+        "start_datetime": "2025-01-01T00:00:00",
+        "end_datetime": "2025-01-01T00:05:00",
+    }
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"symbol": "SPX", "timeframe": "1m"},
+        {"symbol": "NDX", "timeframe": "1d"},
+    ],
+)
+def test_backtest_period_endpoint_preserves_typed_input_errors(
+    analysis_client: TestClient, params: dict[str, str]
+) -> None:
+    response = analysis_client.get("/backtests/period", params=params)
+
+    assert response.status_code == 400
+    assert response.json()["type"] in {"unsupported_symbol", "unsupported_timeframe"}
+
+
 @pytest.mark.parametrize(
     ("payload", "expected_status"),
     [
         ({"symbol": "SPX"}, 400),
         ({"symbol": "NDX", "timeframe": "1d"}, 400),
-        ({"symbol": "NDX", "limit": 0}, 422),
-        ({"symbol": "NDX", "limit": 5001}, 422),
         ({"symbol": "NDX", "initial_cash": 0}, 422),
         ({"symbol": "NDX", "fees": -0.1}, 422),
         ({"symbol": "NDX", "slippage": -0.1}, 422),
@@ -151,7 +322,7 @@ def test_backtest_result_is_deterministic_and_typed(analysis_client: TestClient)
 def test_backtest_validates_symbol_timeframe_and_bounds(
     analysis_client: TestClient, payload: dict[str, object], expected_status: int
 ) -> None:
-    full_payload = {"strategy": "sma_cross", **payload}
+    full_payload = {**backtest_payload(), **payload}
 
     response = analysis_client.post("/backtests", json=full_payload)
 
@@ -160,7 +331,7 @@ def test_backtest_validates_symbol_timeframe_and_bounds(
 
 def test_unsupported_strategy_is_a_typed_400(analysis_client: TestClient) -> None:
     response = analysis_client.post(
-        "/backtests", json={"symbol": "NDX", "strategy": "not_registered"}
+        "/backtests", json=backtest_payload(strategy="not_registered")
     )
 
     assert response.status_code == 400
@@ -175,11 +346,7 @@ def test_unsupported_strategy_is_a_typed_400(analysis_client: TestClient) -> Non
 def test_invalid_strategy_parameters_are_a_typed_400(analysis_client: TestClient) -> None:
     response = analysis_client.post(
         "/backtests",
-        json={
-            "symbol": "NDX",
-            "strategy": "sma_cross",
-            "parameters": {"fast_window": 3, "slow_window": 2},
-        },
+        json=backtest_payload(parameters={"fast_window": 3, "slow_window": 2}),
     )
 
     assert response.status_code == 400
@@ -228,7 +395,20 @@ def test_strategy_catalog_is_registry_driven_and_typed(analysis_client: TestClie
 def test_unavailable_database_is_a_typed_503(tmp_path: Path) -> None:
     client = TestClient(create_app(DuckDbCandleRepository(tmp_path / "missing.duckdb")))
 
-    response = client.post("/backtests", json={"symbol": "NDX", "strategy": "sma_cross"})
+    response = client.post("/backtests", json=backtest_payload())
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "type": "service_unavailable",
+        "title": "Market data service unavailable",
+        "detail": "market database is unavailable",
+    }
+
+
+def test_unavailable_backtest_period_is_a_typed_503(tmp_path: Path) -> None:
+    client = TestClient(create_app(DuckDbCandleRepository(tmp_path / "missing.duckdb")))
+
+    response = client.get("/backtests/period", params={"symbol": "NDX", "timeframe": "1m"})
 
     assert response.status_code == 503
     assert response.json() == {
@@ -246,7 +426,7 @@ def test_backtest_does_not_mutate_the_source_database(tmp_path: Path) -> None:
 
     response = client.post(
         "/backtests",
-        json={"symbol": "NDX", "strategy": "sma_cross", "limit": 10},
+        json=backtest_payload(),
     )
 
     assert response.status_code == 200
@@ -272,6 +452,15 @@ def test_openapi_documents_backtest_contract(analysis_client: TestClient) -> Non
         "#/components/schemas/UnsupportedTimeframe",
         "#/components/schemas/UnsupportedStrategy",
         "#/components/schemas/InvalidStrategyParameters",
+        "#/components/schemas/InvalidBacktestPeriod",
+        "#/components/schemas/BacktestPeriodEmpty",
+    }
+
+    period_operation = analysis_client.get("/openapi.json").json()["paths"][
+        "/backtests/period"
+    ]["get"]
+    assert period_operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/BacktestPeriod"
     }
 
     catalog_operation = analysis_client.get("/openapi.json").json()["paths"][
