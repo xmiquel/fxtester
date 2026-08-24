@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/backtests/period": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Backtest Period */
+        get: operations["backtest_period_backtests_period_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/backtests/strategies": {
         parameters: {
             query?: never;
@@ -144,8 +161,38 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** BacktestPeriod */
+        BacktestPeriod: {
+            /**
+             * End Datetime
+             * Format: date-time
+             */
+            end_datetime: string;
+            /**
+             * Start Datetime
+             * Format: date-time
+             */
+            start_datetime: string;
+        };
+        /** BacktestPeriodEmpty */
+        BacktestPeriodEmpty: {
+            /** Detail */
+            detail: string;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "backtest_period_empty";
+        };
         /** BacktestRequest */
         BacktestRequest: {
+            /**
+             * End Datetime
+             * Format: date-time
+             */
+            end_datetime: string;
             /**
              * Fees
              * @default 0
@@ -156,11 +203,6 @@ export interface components {
              * @default 10000
              */
             initial_cash: number;
-            /**
-             * Limit
-             * @default 5000
-             */
-            limit: number;
             /** Parameters */
             parameters?: {
                 [key: string]: unknown;
@@ -170,6 +212,11 @@ export interface components {
              * @default 0
              */
             slippage: number;
+            /**
+             * Start Datetime
+             * Format: date-time
+             */
+            start_datetime: string;
             /** Strategy */
             strategy: string;
             /** Symbol */
@@ -184,8 +231,11 @@ export interface components {
         BacktestResponse: {
             /** Candle Count */
             candle_count: number;
-            /** End Datetime */
-            end_datetime: string | null;
+            /**
+             * End Datetime
+             * Format: date-time
+             */
+            end_datetime: string;
             /** Final Value */
             final_value: number;
             /** Initial Cash */
@@ -194,8 +244,11 @@ export interface components {
             max_drawdown: number;
             /** Sharpe Ratio */
             sharpe_ratio: number | null;
-            /** Start Datetime */
-            start_datetime: string | null;
+            /**
+             * Start Datetime
+             * Format: date-time
+             */
+            start_datetime: string;
             /** Strategy */
             strategy: string;
             /** Symbol */
@@ -267,6 +320,18 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** InvalidBacktestPeriod */
+        InvalidBacktestPeriod: {
+            /** Detail */
+            detail: string;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "invalid_backtest_period";
         };
         /** InvalidStrategyParameters */
         InvalidStrategyParameters: {
@@ -420,7 +485,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UnsupportedSymbol"] | components["schemas"]["UnsupportedTimeframe"] | components["schemas"]["UnsupportedStrategy"] | components["schemas"]["InvalidStrategyParameters"];
+                    "application/json": components["schemas"]["UnsupportedSymbol"] | components["schemas"]["UnsupportedTimeframe"] | components["schemas"]["UnsupportedStrategy"] | components["schemas"]["InvalidStrategyParameters"] | components["schemas"]["InvalidBacktestPeriod"] | components["schemas"]["BacktestPeriodEmpty"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The market source cannot be read. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceUnavailable"];
+                };
+            };
+        };
+    };
+    backtest_period_backtests_period_get: {
+        parameters: {
+            query: {
+                symbol: string;
+                timeframe?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestPeriod"];
+                };
+            };
+            /** @description The requested symbol or timeframe has no available analysis data. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnsupportedSymbol"] | components["schemas"]["UnsupportedTimeframe"] | components["schemas"]["BacktestPeriodEmpty"];
                 };
             };
             /** @description Validation Error */

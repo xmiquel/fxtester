@@ -18,7 +18,8 @@ vi.mock("lightweight-charts", () => ({
 }));
 
 interface BacktestPayload {
-  limit: number;
+  start_datetime: string;
+  end_datetime: string;
   strategy: string;
   symbol: string;
   timeframe: string;
@@ -55,6 +56,14 @@ test("discovers strategies, submits the shared timeframe and period, and display
         },
       ]),
     ),
+    http.get("*/api/backtests/period", ({ request }) => {
+      const timeframe = new URL(request.url).searchParams.get("timeframe") ?? "1m";
+      return HttpResponse.json(
+        timeframe === "5m"
+          ? { start_datetime: "2025-01-01T00:00:00", end_datetime: "2025-01-01T08:19:00" }
+          : { start_datetime: "2025-01-01T00:00:00", end_datetime: "2025-01-01T00:09:00" },
+      );
+    }),
     http.post("*/api/backtests", async ({ request }) => {
       const payload = (await request.json()) as BacktestPayload;
       requests.push(payload);
@@ -64,7 +73,7 @@ test("discovers strategies, submits the shared timeframe and period, and display
         strategy: payload.strategy,
         start_datetime: "2025-01-01T00:00:00",
         end_datetime: "2025-01-01T08:19:00",
-        candle_count: payload.limit,
+         candle_count: 2,
         initial_cash: 10000,
         final_value: 10000,
         total_return: 0,
@@ -83,8 +92,13 @@ test("discovers strategies, submits the shared timeframe and period, and display
 
   expect(await screen.findByRole("heading", { name: "Backtest a strategy" })).toBeInTheDocument();
   expect(screen.getByRole("combobox", { name: "Timeframe" })).toHaveValue("5m");
-  fireEvent.change(screen.getByRole("combobox", { name: "Evaluation period/window" }), {
-    target: { value: "5000" },
+  expect(screen.getByLabelText("Start date")).toHaveValue("2025-01-01T00:00");
+  expect(screen.getByLabelText("End date")).toHaveValue("2025-01-01T08:19");
+  fireEvent.change(screen.getByLabelText("Start date"), {
+    target: { value: "2025-01-01T00:05" },
+  });
+  fireEvent.change(screen.getByLabelText("End date"), {
+    target: { value: "2025-01-01T08:15" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Run backtest" }));
 
@@ -93,6 +107,51 @@ test("discovers strategies, submits the shared timeframe and period, and display
   expect(screen.getByText("2025-01-01T08:19:00")).toBeInTheDocument();
   expect(screen.getByText("Unavailable")).toBeInTheDocument();
   expect(requests).toEqual([
-    expect.objectContaining({ limit: 5000, strategy: "sma_cross", symbol: "NDX", timeframe: "5m" }),
+    expect.objectContaining({
+      start_datetime: "2025-01-01T00:05",
+      end_datetime: "2025-01-01T08:15",
+      strategy: "sma_cross",
+      symbol: "NDX",
+      timeframe: "5m",
+    }),
   ]);
+});
+
+test("shows an accessible ordering error without submitting an invalid range", async () => {
+  const requests: BacktestPayload[] = [];
+  server.use(
+    http.get("*/api/backtests/strategies", () =>
+      HttpResponse.json([
+        {
+          name: "sma_cross",
+          label: "SMA crossover",
+          description: "Trade long when averages cross.",
+          parameters: [],
+        },
+      ]),
+    ),
+    http.get("*/api/backtests/period", () =>
+      HttpResponse.json({ start_datetime: "2025-01-01T00:00:00", end_datetime: "2025-01-01T01:00:00" }),
+    ),
+    http.post("*/api/backtests", async ({ request }) => {
+      requests.push((await request.json()) as BacktestPayload);
+      return HttpResponse.json({});
+    }),
+  );
+
+  renderApp();
+  fireEvent.click(await screen.findByRole("tab", { name: "Backtest" }));
+  await screen.findByRole("heading", { name: "Backtest a strategy" });
+  fireEvent.change(screen.getByLabelText("Start date"), {
+    target: { value: "2025-01-01T01:00" },
+  });
+  fireEvent.change(screen.getByLabelText("End date"), {
+    target: { value: "2025-01-01T00:00" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Run backtest" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Start date must be before or equal to end date.",
+  );
+  expect(requests).toHaveLength(0);
 });

@@ -150,6 +150,8 @@ class CandleRepository(Protocol):
         self, symbol: str, timeframe: str, cursor: datetime | None, limit: int
     ) -> CandleWindow: ...
 
+    def read_bounds(self, symbol: str, timeframe: str) -> tuple[datetime, datetime] | None: ...
+
 
 class DuckDbCandleRepository:
     def __init__(self, database_path: Path = SOURCE_DATABASE) -> None:
@@ -175,15 +177,85 @@ class DuckDbCandleRepository:
         )
         return CandleWindow(candles=candles, next_cursor=next_cursor, has_more=has_more)
 
-    def read_series(self, symbol: str, timeframe: str, limit: int) -> list[dict[str, object]]:
+    def read_series(
+        self, symbol: str, timeframe: str, start_datetime: datetime, end_datetime: datetime
+    ) -> list[dict[str, object]]:
         parsed_timeframe = parse_timeframe(timeframe)
         if parsed_timeframe is None:
             raise ValueError(f"Unsupported timeframe: {timeframe}")
 
-        rows, columns = self._read_rows(
-            symbol, parsed_timeframe, limit, cursor=None, descending=False
-        )
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                if parsed_timeframe.token == DEFAULT_TIMEFRAME:
+                    query = f"""
+                        SELECT {SOURCE_COLUMN_SQL}
+                        FROM {SOURCE_TABLE}
+                        WHERE symbol = ? AND datetime >= ? AND datetime <= ?
+                        ORDER BY datetime ASC
+                    """  # noqa: S608 - identifier is a module constant
+                else:
+                    bucket_expression = self._bucket_expression(parsed_timeframe)
+                    query = f"""
+                        SELECT
+                          {bucket_expression} AS datetime,
+                          symbol,
+                          FIRST("OPEN" ORDER BY datetime) AS open,
+                          MAX(high) AS high, MIN(low) AS low,
+                          LAST("close" ORDER BY datetime) AS close,
+                          SUM(tickvol) AS tickvol, SUM(volume) AS volume,
+                          LAST(spread ORDER BY datetime) AS spread,
+                          LAST(origen ORDER BY datetime) AS origen,
+                          MAX(fecha_carga) AS fecha_carga
+                        FROM {SOURCE_TABLE}
+                        WHERE symbol = ?
+                        GROUP BY {bucket_expression}, symbol
+                        HAVING {bucket_expression} >= ? AND {bucket_expression} <= ?
+                        ORDER BY {bucket_expression} ASC
+                    """  # noqa: S608 - identifier is a module constant
+                parameters = [symbol, start_datetime, end_datetime]
+                rows = connection.execute(query, parameters).fetchall()
+                columns = [column[0] for column in connection.description]
+        except (duckdb.Error, OSError) as error:
+            raise DatabaseUnavailable("market database is unavailable") from error
         return self._map_rows(columns, rows)
+
+    def read_bounds(self, symbol: str, timeframe: str) -> tuple[datetime, datetime] | None:
+        parsed_timeframe = parse_timeframe(timeframe)
+        if parsed_timeframe is None:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                if parsed_timeframe.token == DEFAULT_TIMEFRAME:
+                    query = f"""
+                        SELECT MIN(datetime), MAX(datetime)
+                        FROM {SOURCE_TABLE}
+                        WHERE symbol = ?
+                    """  # noqa: S608 - identifier is a module constant
+                else:
+                    bucket_expression = self._bucket_expression(parsed_timeframe)
+                    query = f"""
+                        SELECT MIN({bucket_expression}), MAX({bucket_expression})
+                        FROM {SOURCE_TABLE}
+                        WHERE symbol = ?
+                    """  # noqa: S608 - identifier is a module constant
+                row = connection.execute(query, [symbol]).fetchone()
+        except (duckdb.Error, OSError) as error:
+            raise DatabaseUnavailable("market database is unavailable") from error
+
+        if row is None:
+            return None
+        start_datetime, end_datetime = row
+        if start_datetime is None or end_datetime is None:
+            return None
+        return cast(datetime, start_datetime), cast(datetime, end_datetime)
+
+    @staticmethod
+    def _bucket_expression(timeframe: ParsedTimeframe) -> str:
+        return f"""TIMESTAMP 'epoch' + (
+                CAST(FLOOR(EXTRACT(epoch FROM datetime)) AS BIGINT)
+                // {timeframe.bucket_seconds} * {timeframe.bucket_seconds}
+              ) * INTERVAL '1 second'"""
 
     def _read_rows(
         self,
@@ -213,11 +285,7 @@ class DuckDbCandleRepository:
                         LIMIT ?
                     """  # noqa: S608 - identifiers and order are constants
                 else:
-                    bucket_seconds = timeframe.bucket_seconds
-                    bucket_expression = f"""TIMESTAMP 'epoch' + (
-                            CAST(FLOOR(EXTRACT(epoch FROM datetime)) AS BIGINT)
-                            // {bucket_seconds} * {bucket_seconds}
-                          ) * INTERVAL '1 second'"""
+                    bucket_expression = self._bucket_expression(timeframe)
                     query = f"""
                         SELECT
                           {bucket_expression} AS datetime,

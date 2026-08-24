@@ -6,6 +6,7 @@ vi.mock("../../src/observability", () => ({
 }));
 
 import {
+  fetchBacktestPeriod,
   fetchStrategyDefinitions,
   submitBacktest,
   type BacktestRequest,
@@ -34,11 +35,30 @@ test("maps the strategy catalog response and forwards its AbortSignal", async ()
   fetchMock.mockRestore();
 });
 
-test("serializes the existing backtest request contract and maps its response", async () => {
+test("discovers the available period for a symbol and timeframe", async () => {
+  const controller = new AbortController();
+  const period = {
+    start_datetime: "2025-01-01T00:00:00",
+    end_datetime: "2025-01-01T08:19:00",
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(period), { status: 200 }),
+  );
+
+  await expect(fetchBacktestPeriod("NDX", "5m", controller.signal)).resolves.toEqual(period);
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/backtests/period?symbol=NDX&timeframe=5m"),
+    { signal: controller.signal },
+  );
+  fetchMock.mockRestore();
+});
+
+test("serializes a date-bounded backtest request and maps its response", async () => {
   const request: BacktestRequest = {
     fees: 0,
     initial_cash: 10000,
-    limit: 500,
+    start_datetime: "2025-01-01T00:00:00",
+    end_datetime: "2025-01-02T00:00:00",
     parameters: { fast_window: 10, slow_window: 30 },
     slippage: 0,
     strategy: "sma_cross",
@@ -69,5 +89,45 @@ test("serializes the existing backtest request contract and maps its response", 
     headers: { "content-type": "application/json" },
     method: "POST",
   });
+  fetchMock.mockRestore();
+});
+
+test("surfaces the detail from a typed backend error envelope", async () => {
+  const request: BacktestRequest = {
+    fees: 0,
+    initial_cash: 10000,
+    start_datetime: "2025-01-01T00:00:00",
+    end_datetime: "2025-01-02T00:00:00",
+    parameters: {},
+    slippage: 0,
+    strategy: "sma_cross",
+    symbol: "NDX",
+    timeframe: "5m",
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        type: "invalid_backtest_period",
+        title: "Invalid backtest period",
+        detail: "start_datetime must be less than or equal to end_datetime",
+      }),
+      { status: 400 },
+    ),
+  );
+
+  await expect(submitBacktest(request)).rejects.toThrow(
+    "start_datetime must be less than or equal to end_datetime",
+  );
+  fetchMock.mockRestore();
+});
+
+test("falls back to the status message for a malformed error response", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response("not-json", { status: 502 }),
+  );
+
+  await expect(fetchStrategyDefinitions(new AbortController().signal)).rejects.toThrow(
+    "Unable to load backtest strategies (502)",
+  );
   fetchMock.mockRestore();
 });

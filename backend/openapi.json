@@ -1,8 +1,57 @@
 {
   "components": {
     "schemas": {
+      "BacktestPeriod": {
+        "properties": {
+          "end_datetime": {
+            "format": "date-time",
+            "title": "End Datetime",
+            "type": "string"
+          },
+          "start_datetime": {
+            "format": "date-time",
+            "title": "Start Datetime",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start_datetime",
+          "end_datetime"
+        ],
+        "title": "BacktestPeriod",
+        "type": "object"
+      },
+      "BacktestPeriodEmpty": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "const": "backtest_period_empty",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "detail"
+        ],
+        "title": "BacktestPeriodEmpty",
+        "type": "object"
+      },
       "BacktestRequest": {
         "properties": {
+          "end_datetime": {
+            "format": "date-time",
+            "title": "End Datetime",
+            "type": "string"
+          },
           "fees": {
             "default": 0.0,
             "minimum": 0.0,
@@ -15,13 +64,6 @@
             "title": "Initial Cash",
             "type": "number"
           },
-          "limit": {
-            "default": 5000,
-            "maximum": 5000.0,
-            "minimum": 1.0,
-            "title": "Limit",
-            "type": "integer"
-          },
           "parameters": {
             "additionalProperties": true,
             "title": "Parameters",
@@ -32,6 +74,11 @@
             "minimum": 0.0,
             "title": "Slippage",
             "type": "number"
+          },
+          "start_datetime": {
+            "format": "date-time",
+            "title": "Start Datetime",
+            "type": "string"
           },
           "strategy": {
             "maxLength": 100,
@@ -55,7 +102,9 @@
         },
         "required": [
           "symbol",
-          "strategy"
+          "strategy",
+          "start_datetime",
+          "end_datetime"
         ],
         "title": "BacktestRequest",
         "type": "object"
@@ -67,16 +116,9 @@
             "type": "integer"
           },
           "end_datetime": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "End Datetime"
+            "format": "date-time",
+            "title": "End Datetime",
+            "type": "string"
           },
           "final_value": {
             "title": "Final Value",
@@ -102,16 +144,9 @@
             "title": "Sharpe Ratio"
           },
           "start_datetime": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start Datetime"
+            "format": "date-time",
+            "title": "Start Datetime",
+            "type": "string"
           },
           "strategy": {
             "title": "Strategy",
@@ -300,6 +335,30 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InvalidBacktestPeriod": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "const": "invalid_backtest_period",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "detail"
+        ],
+        "title": "InvalidBacktestPeriod",
         "type": "object"
       },
       "InvalidStrategyParameters": {
@@ -659,6 +718,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/InvalidStrategyParameters"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidBacktestPeriod"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestPeriodEmpty"
                     }
                   ],
                   "title": "Response 400 Backtests Backtests Post"
@@ -689,6 +754,89 @@
           }
         },
         "summary": "Backtests",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
+    "/backtests/period": {
+      "get": {
+        "operationId": "backtest_period_backtests_period_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "symbol",
+            "required": true,
+            "schema": {
+              "title": "Symbol",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeframe",
+            "required": false,
+            "schema": {
+              "default": "1m",
+              "title": "Timeframe",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestPeriod"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/UnsupportedSymbol"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnsupportedTimeframe"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestPeriodEmpty"
+                    }
+                  ],
+                  "title": "Response 400 Backtest Period Backtests Period Get"
+                }
+              }
+            },
+            "description": "The requested symbol or timeframe has no available analysis data."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailable"
+                }
+              }
+            },
+            "description": "The market source cannot be read."
+          }
+        },
+        "summary": "Backtest Period",
         "tags": [
           "analysis"
         ]

@@ -5,15 +5,14 @@ from pydantic import BaseModel, Field
 
 from app.features.candles.window import DEFAULT_TIMEFRAME
 
-BACKTEST_LIMIT = 5000
-
 
 class BacktestRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=100)
     timeframe: str = Field(default=DEFAULT_TIMEFRAME, min_length=2, max_length=10)
     strategy: str = Field(min_length=1, max_length=100)
     parameters: dict[str, object] = Field(default_factory=dict)
-    limit: int = Field(default=BACKTEST_LIMIT, ge=1, le=BACKTEST_LIMIT)
+    start_datetime: datetime
+    end_datetime: datetime
     initial_cash: float = Field(default=10000.0, gt=0, allow_inf_nan=False)
     fees: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     slippage: float = Field(default=0.0, ge=0, allow_inf_nan=False)
@@ -23,8 +22,8 @@ class BacktestResponse(BaseModel):
     symbol: str
     timeframe: str
     strategy: str
-    start_datetime: datetime | None
-    end_datetime: datetime | None
+    start_datetime: datetime
+    end_datetime: datetime
     candle_count: int
     initial_cash: float
     final_value: float
@@ -62,3 +61,20 @@ class InvalidStrategyParameters(BaseModel):
     title: str
     detail: str
     strategy: str
+
+
+class BacktestPeriod(BaseModel):
+    start_datetime: datetime
+    end_datetime: datetime
+
+
+class InvalidBacktestPeriod(BaseModel):
+    type: Literal["invalid_backtest_period"]
+    title: str
+    detail: str
+
+
+class BacktestPeriodEmpty(BaseModel):
+    type: Literal["backtest_period_empty"]
+    title: str
+    detail: str
