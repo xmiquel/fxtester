@@ -3,9 +3,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import { BacktestPage } from "./features/backtests/BacktestPage";
 import { CandlestickChart } from "./features/candles/CandlestickChart";
 import { ChartToolbar } from "./features/candles/ChartToolbar";
-import { SymbolSelector } from "./features/candles/SymbolSelector";
 import {
   loadChartTimeframePreferences,
+  normalizeCatalogSymbols,
   persistChartTimeframePreferences,
   reconcileChartTimeframePreferences,
   type ChartTimeframePreferences,
@@ -22,10 +22,21 @@ const SECTION = {
 type Section = (typeof SECTION)[keyof typeof SECTION];
 const PRIMARY_CHART_ID = "primary-market-data";
 
+function samePreferences(left: ChartTimeframePreferences, right: ChartTimeframePreferences): boolean {
+  return (
+    left.selectedSymbol === right.selectedSymbol &&
+    left.available.length === right.available.length &&
+    left.available.every((value, index) => value === right.available[index]) &&
+    left.favorites.length === right.favorites.length &&
+    left.favorites.every((value, index) => value === right.favorites[index])
+  );
+}
+
 export function App() {
   const symbolsQuery = useSymbols();
   const timeframesQuery = useTimeframes();
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [backtestSelectedSymbol, setBacktestSelectedSymbol] = useState<string | null>(null);
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>("1m");
   const [timeframePreferences, setTimeframePreferences] = useState<ChartTimeframePreferences>(() =>
     loadChartTimeframePreferences(PRIMARY_CHART_ID),
@@ -34,21 +45,38 @@ export function App() {
   const symbols = symbolsQuery.data?.symbols;
   const timeframes = timeframesQuery.data ?? timeframePolicy.fallback;
 
-  useEffect(() => {
-    setTimeframePreferences((current) => {
-      const next = reconcileChartTimeframePreferences(current, timeframes);
-      persistChartTimeframePreferences(PRIMARY_CHART_ID, next);
-      return next;
-    });
-  }, [timeframes]);
-
   useTimeframeKeyboard(setSelectedTimeframe);
 
   useEffect(() => {
     if (symbols && symbols.length > 0) {
-      setSelectedSymbol((current) => (current && symbols.includes(current) ? current : symbols[0]));
+      const normalizedSymbols = normalizeCatalogSymbols(symbols);
+      const firstSymbol = normalizedSymbols[0]?.original ?? null;
+      const reconciled = reconcileChartTimeframePreferences(timeframePreferences, timeframes, symbols);
+      setTimeframePreferences((current) => (samePreferences(current, reconciled) ? current : reconciled));
+      persistChartTimeframePreferences(PRIMARY_CHART_ID, reconciled, symbols);
+      setSelectedSymbol((current) => {
+        if (current && normalizedSymbols.some((symbol) => symbol.original === current)) {
+          return current;
+        }
+        return reconciled.selectedSymbol ?? firstSymbol;
+      });
+      setBacktestSelectedSymbol((current) => {
+        if (current && normalizedSymbols.some((symbol) => symbol.original === current)) {
+          return current;
+        }
+        return firstSymbol;
+      });
     }
-  }, [symbols]);
+  }, [symbols, timeframePreferences, timeframes]);
+
+  const selectMarketSymbol = (symbol: string) => {
+    setSelectedSymbol(symbol);
+    setTimeframePreferences((current) => {
+      const next = reconcileChartTimeframePreferences({ ...current, selectedSymbol: symbol }, timeframes, symbols);
+      persistChartTimeframePreferences(PRIMARY_CHART_ID, next, symbols);
+      return next;
+    });
+  };
 
   let content: ReactNode;
   if (symbolsQuery.isPending || (symbols && symbols.length > 0 && selectedSymbol === null)) {
@@ -69,9 +97,9 @@ export function App() {
   } else if (activeSection === SECTION.BACKTEST) {
     content = (
       <BacktestPage
-        onSelectSymbol={setSelectedSymbol}
+        onSelectSymbol={setBacktestSelectedSymbol}
         onSelectTimeframe={setSelectedTimeframe}
-        selectedSymbol={selectedSymbol}
+        selectedSymbol={backtestSelectedSymbol ?? selectedSymbol}
         selectedTimeframe={selectedTimeframe}
         symbols={symbols}
         timeframes={timeframes}
@@ -80,17 +108,29 @@ export function App() {
   } else {
     content = (
       <>
-        <SymbolSelector onSelect={setSelectedSymbol} selectedSymbol={selectedSymbol} symbols={symbols} />
         <ChartToolbar
           chartId={PRIMARY_CHART_ID}
           onChange={(next) => {
-            const reconciled = reconcileChartTimeframePreferences(next, timeframes);
-            setTimeframePreferences(reconciled);
-            persistChartTimeframePreferences(PRIMARY_CHART_ID, reconciled);
+            setTimeframePreferences((current) => {
+              const reconciled = reconcileChartTimeframePreferences(
+                { ...next, selectedSymbol: current.selectedSymbol },
+                timeframes,
+                symbols,
+              );
+              persistChartTimeframePreferences(PRIMARY_CHART_ID, reconciled, symbols);
+              return reconciled;
+            });
           }}
           onSelect={setSelectedTimeframe}
           preferences={timeframePreferences}
           selectedTimeframe={selectedTimeframe}
+          symbolSelector={{
+            onSelect: selectMarketSymbol,
+            selectedSymbol,
+            symbols,
+            isError: symbolsQuery.isError,
+            isLoading: symbolsQuery.isPending,
+          }}
         />
         <CandlestickChart symbol={selectedSymbol} timeframe={selectedTimeframe} />
       </>

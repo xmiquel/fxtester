@@ -183,11 +183,12 @@ test("selects a catalog symbol and resets candle requests to that symbol", async
   });
 
   await page.goto("/");
-  const selector = page.getByRole("combobox", { name: "Market symbol" });
-  await expect(selector).toHaveValue("NDX");
+  const selector = page.getByRole("button", { name: "Market symbol" });
+  await expect(selector).toContainText("NDX");
   await panChartRight(page);
   await expect.poll(() => requests.length).toBe(2);
-  await selector.selectOption("SPX");
+  await selector.click();
+  await page.getByRole("option", { name: "SPX" }).click();
   await expect(page.getByRole("heading", { name: "SPX · 1m" })).toBeVisible();
   await expect(page.getByRole("status", { name: "Older-window navigation is active." })).not.toBeVisible();
   await expect.poll(() => requests.length).toBe(3);
