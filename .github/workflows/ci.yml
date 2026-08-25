@@ -78,8 +78,8 @@ jobs:
         run: |
           IMAGE_VERSION="ci-${{ github.sha }}" BUILD_REVISION="${{ github.sha }}" docker compose --project-name "ci-${{ github.sha }}" build --build-arg "BUILD_REVISION=${{ github.sha }}" backend
           docker compose --project-name "ci-${{ github.sha }}" build frontend
-          IMAGE_VERSION="ci-${{ github.sha }}" docker compose --project-name "ci-${{ github.sha }}" up --detach backend frontend
           trap 'docker compose --project-name "ci-${{ github.sha }}" logs backend frontend; docker compose --project-name "ci-${{ github.sha }}" down --volumes' EXIT
+          IMAGE_VERSION="ci-${{ github.sha }}" docker compose --project-name "ci-${{ github.sha }}" up --detach backend frontend
           for _ in $(seq 1 30); do
             if curl --fail --silent --show-error http://127.0.0.1:8000/health && curl --fail --silent --show-error http://127.0.0.1:8000/ready; then
               break
