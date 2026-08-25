@@ -31,11 +31,11 @@ test.each([
   ["2m", "2m"],
   ["1h", "1h"],
   ["3h", "3h"],
-  ["6M", "6m"],
+  ["6M", "6M"],
   ["0m", null],
   ["1.5h", null],
   ["-1m", null],
-  ["1d", null],
+  ["1d", "1d"],
   ["1", null],
 ])("parses timeframe token %s", (input, expected) => {
   expect(parseTimeframeToken(input)).toBe(expected);

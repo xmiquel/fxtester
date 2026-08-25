@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 import { App } from "../src/App";
 import { server } from "./mocks/server";
@@ -26,6 +26,10 @@ function renderApp() {
   );
 }
 
+beforeEach(() => {
+  localStorage.clear();
+});
+
 test("selects the first catalog symbol and isolates the next candle request by selected symbol", async () => {
   const candleSymbols: string[] = [];
   server.use(
@@ -49,7 +53,7 @@ test("selects the first catalog symbol and isolates the next candle request by s
   expect(candleSymbols).toEqual(["DAX", "SPX"]);
 });
 
-test("renders timeframe selector and switches timeframe", async () => {
+test("renders favorite timeframe toolbar and switches timeframe", async () => {
   server.use(
     http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
     http.get("*/api/timeframes", () => HttpResponse.json(["1m", "2m", "5m", "15m", "1h"])),
@@ -61,16 +65,16 @@ test("renders timeframe selector and switches timeframe", async () => {
 
   renderApp();
 
-  const timeframeSelector = await screen.findByRole("combobox", { name: "Timeframe" });
-  expect(timeframeSelector).toHaveValue("1m");
+  const timeframeButton = await screen.findByRole("button", { name: "1m timeframe, selected" });
   expect(await screen.findByText("No NDX 1m candles are available.")).toBeInTheDocument();
 
-  fireEvent.change(timeframeSelector, { target: { value: "5m" } });
+  fireEvent.click(screen.getByRole("button", { name: "5m timeframe" }));
   expect(await screen.findByText("No NDX 5m candles are available.")).toBeInTheDocument();
   expect(screen.getByText("Selected symbol · 5m")).toBeInTheDocument();
+  expect(timeframeButton).toHaveAttribute("aria-pressed", "false");
 });
 
-test("switches to a custom timeframe and represents it in the selector", async () => {
+test("switches to an exact custom timeframe token from the keyboard", async () => {
   server.use(
     http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
     http.get("*/api/timeframes", () => HttpResponse.json(["1m", "2m", "5m", "15m", "1h"])),
@@ -82,18 +86,15 @@ test("switches to a custom timeframe and represents it in the selector", async (
 
   renderApp();
 
-  const timeframeSelector = await screen.findByRole("combobox", { name: "Timeframe" });
   await screen.findByText("No NDX 1m candles are available.");
   fireEvent.keyDown(window, { key: "3" });
-  fireEvent.keyDown(window, { key: "h" });
+  fireEvent.keyDown(window, { key: "w" });
 
-  expect(timeframeSelector).toHaveValue("3h");
-  expect(screen.getByRole("option", { name: "3h" })).toBeInTheDocument();
-  expect(await screen.findByText("No NDX 3h candles are available.")).toBeInTheDocument();
-  expect(timeframeSelector).toHaveAccessibleDescription(/Type any positive integer.*6m or 3h/);
+  expect(await screen.findByText("No NDX 3w candles are available.")).toBeInTheDocument();
+  expect(screen.getByText("Selected symbol · 3w")).toBeInTheDocument();
 });
 
-test("does not switch timeframe when the selector owns the keyboard event", async () => {
+test("does not switch timeframe when the management form owns the keyboard event", async () => {
   server.use(
     http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
     http.get("*/api/timeframes", () => HttpResponse.json(["1m", "2m", "5m", "15m", "1h"])),
@@ -105,11 +106,37 @@ test("does not switch timeframe when the selector owns the keyboard event", asyn
 
   renderApp();
 
-  const timeframeSelector = await screen.findByRole("combobox", { name: "Timeframe" });
-  fireEvent.keyDown(timeframeSelector, { key: "1" });
-  fireEvent.keyDown(timeframeSelector, { key: "h" });
+  await screen.findByText("No NDX 1m candles are available.");
+  fireEvent.click(screen.getByRole("button", { name: "Manage timeframes" }));
+  const customInput = screen.getByRole("textbox", { name: "Custom timeframe" });
+  fireEvent.keyDown(customInput, { key: "1" });
+  fireEvent.keyDown(customInput, { key: "h" });
 
-  expect(timeframeSelector).toHaveValue("1m");
+  expect(screen.getByText("Selected symbol · 1m")).toBeInTheDocument();
+});
+
+test("adds a valid custom favorite and requests its exact token", async () => {
+  const requests: string[] = [];
+  server.use(
+    http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX"] })),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "1d", "1w", "1M"])),
+    http.get("*/api/candles", ({ request }) => {
+      const timeframe = new URL(request.url).searchParams.get("timeframe") ?? "1m";
+      requests.push(timeframe);
+      return HttpResponse.json({ candles: [], has_more: false, next_cursor: null, symbol: "NDX", timeframe });
+    }),
+  );
+
+  renderApp();
+
+  await screen.findByText("No NDX 1m candles are available.");
+  fireEvent.click(screen.getByRole("button", { name: "Manage timeframes" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Custom timeframe" }), { target: { value: "7m" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add timeframe" }));
+  fireEvent.click(screen.getByRole("button", { name: "7m timeframe" }));
+
+  await screen.findByText("No NDX 7m candles are available.");
+  expect(requests).toContain("7m");
 });
 
 test("renders empty and retryable catalog states without requesting candles", async () => {

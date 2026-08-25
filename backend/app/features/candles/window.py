@@ -11,18 +11,23 @@ import duckdb
 from fastapi import HTTPException
 
 SOURCE_DATABASE = Path("/data/market.duckdb")
-SUPPORTED_TIMEFRAMES: frozenset[str] = frozenset({"1m", "2m", "5m", "15m", "1h"})
+SUPPORTED_TIMEFRAMES: frozenset[str] = frozenset(
+    {"1m", "2m", "5m", "15m", "1h", "1d", "1w", "1M"}
+)
 DEFAULT_TIMEFRAME: str = "1m"
-# Epoch seconds for preset timeframes — used for preset ordering and API output.
-#   TIMESTAMP 'epoch' + (epoch_seconds // bucket_seconds * bucket_seconds) * INTERVAL '1 second'
+# Fixed seconds are used for preset ordering and the backtest strategy frequency.
 TIMEFRAME_BUCKET_SECONDS: dict[str, int] = {
     "1m": 60,
     "2m": 120,
     "5m": 300,
     "15m": 900,
     "1h": 3600,
+    "1d": 86400,
+    "1w": 604800,
+    # Calendar months have no fixed duration; this value is only a frequency hint.
+    "1M": 2592000,
 }
-TIMEFRAME_TOKEN_PATTERN = re.compile(r"^(?P<amount>[1-9][0-9]*)(?P<unit>[mh])$", re.IGNORECASE)
+TIMEFRAME_TOKEN_PATTERN = re.compile(r"^(?P<amount>[1-9][0-9]*)(?P<unit>[mhdwM])$")
 EPOCH = datetime(1970, 1, 1)
 SOURCE_TABLE = "dt_ohlc_m1"
 CANDLE_WINDOW_LIMIT = 1000
@@ -89,7 +94,13 @@ class CandleWindow:
 @dataclass(frozen=True)
 class ParsedTimeframe:
     token: str
+    amount: int
+    unit: str
     bucket_seconds: int
+
+    @property
+    def is_calendar(self) -> bool:
+        return self.unit in {"d", "w", "M"}
 
 
 def parse_timeframe(timeframe: str) -> ParsedTimeframe | None:
@@ -98,9 +109,11 @@ def parse_timeframe(timeframe: str) -> ParsedTimeframe | None:
         return None
 
     amount = int(match.group("amount"))
-    unit = match.group("unit").lower()
-    multiplier = 3600 if unit == "h" else 60
-    return ParsedTimeframe(token=f"{amount}{unit}", bucket_seconds=amount * multiplier)
+    unit = match.group("unit")
+    multipliers = {"m": 60, "h": 3600, "d": 86400, "w": 604800, "M": 2592000}
+    return ParsedTimeframe(
+        token=f"{amount}{unit}", amount=amount, unit=unit, bucket_seconds=amount * multipliers[unit]
+    )
 
 
 class DatabaseUnavailable(RuntimeError):
@@ -123,7 +136,7 @@ class UnsupportedTimeframeError(ValueError):
         self.timeframe = timeframe
         super().__init__(
             f"Unsupported timeframe '{timeframe}'. "
-            "Expected a positive integer followed by 'm' or 'h'."
+            "Expected a positive integer followed by 'm', 'h', 'd', 'w', or 'M'."
         )
 
 
@@ -137,6 +150,35 @@ def normalize_cursor_to_bucket(cursor: datetime, bucket_seconds: int) -> datetim
 
     bucket = timedelta(seconds=bucket_seconds)
     return EPOCH + ((cursor - EPOCH) // bucket) * bucket
+
+
+def normalize_cursor_to_timeframe(cursor: datetime, timeframe: ParsedTimeframe) -> datetime:
+    """Normalize a cursor without converting raw calendar timestamps through UTC."""
+    if not timeframe.is_calendar:
+        return normalize_cursor_to_bucket(cursor, timeframe.bucket_seconds)
+
+    if cursor.tzinfo is not None:
+        # DuckDB stores broker timestamps as naive wall-clock values. Preserve the
+        # requested wall clock instead of changing it to an absolute UTC instant.
+        cursor = cursor.replace(tzinfo=None)
+
+    if timeframe.unit == "d":
+        calendar_date = cursor.date()
+        days_since_epoch = (calendar_date - EPOCH.date()).days
+        bucket_days = (days_since_epoch // timeframe.amount) * timeframe.amount
+        return datetime.combine(EPOCH.date() + timedelta(days=bucket_days), datetime.min.time())
+
+    if timeframe.unit == "w":
+        monday = cursor.date() - timedelta(days=cursor.weekday())
+        epoch_monday = datetime(1970, 1, 5).date()
+        weeks_since_epoch = (monday - epoch_monday).days // 7
+        bucket_weeks = (weeks_since_epoch // timeframe.amount) * timeframe.amount
+        return datetime.combine(epoch_monday + timedelta(weeks=bucket_weeks), datetime.min.time())
+
+    month_index = (cursor.year - 1970) * 12 + cursor.month - 1
+    bucket_index = (month_index // timeframe.amount) * timeframe.amount
+    year, month_offset = divmod(bucket_index, 12)
+    return datetime(year + 1970, month_offset + 1, 1)
 
 
 class CandleRepository(Protocol):
@@ -252,6 +294,21 @@ class DuckDbCandleRepository:
 
     @staticmethod
     def _bucket_expression(timeframe: ParsedTimeframe) -> str:
+        if timeframe.unit == "d":
+            return f"""TIMESTAMP '1970-01-01' + (
+                    DATE_DIFF('day', DATE '1970-01-01', DATE_TRUNC('day', datetime))
+                    // {timeframe.amount} * {timeframe.amount}
+                  ) * INTERVAL '1 day'"""
+        if timeframe.unit == "w":
+            return f"""TIMESTAMP '1970-01-05' + (
+                    DATE_DIFF('week', DATE '1970-01-05', DATE_TRUNC('week', datetime))
+                    // {timeframe.amount} * {timeframe.amount}
+                  ) * INTERVAL '1 week'"""
+        if timeframe.unit == "M":
+            return f"""TIMESTAMP '1970-01-01' + (
+                    DATE_DIFF('month', DATE '1970-01-01', DATE_TRUNC('month', datetime))
+                    // {timeframe.amount} * {timeframe.amount}
+                  ) * INTERVAL '1 month'"""
         return f"""TIMESTAMP 'epoch' + (
                 CAST(FLOOR(EXTRACT(epoch FROM datetime)) AS BIGINT)
                 // {timeframe.bucket_seconds} * {timeframe.bucket_seconds}
@@ -363,9 +420,7 @@ class CandleWindowService:
                 parsed_cursor = datetime.fromisoformat(cursor)
             except ValueError as error:
                 raise HTTPException(status_code=422, detail="cursor must be ISO-8601") from error
-            parsed_cursor = normalize_cursor_to_bucket(
-                parsed_cursor, parsed_timeframe.bucket_seconds
-            )
+            parsed_cursor = normalize_cursor_to_timeframe(parsed_cursor, parsed_timeframe)
         catalog = self.repository.list_symbols()
         effective_symbol = OMITTED_SYMBOL_COMPATIBILITY_DEFAULT if symbol is None else symbol
         if effective_symbol not in catalog:

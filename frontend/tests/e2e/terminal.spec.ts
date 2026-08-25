@@ -39,7 +39,7 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ contentType: "application/json", body: JSON.stringify({ symbols: ["NDX", "SPX"] }) }),
   );
   await page.route("**/api/timeframes", (route) =>
-    route.fulfill({ contentType: "application/json", body: JSON.stringify(["1m", "2m", "5m", "15m", "1h"]) }),
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(["1m", "5m", "15m", "1h", "1d", "1w", "1M"]) }),
   );
 });
 
@@ -259,4 +259,42 @@ test("keeps the chart visible after an older-window failure and retries", async 
       path: "/",
     })),
   );
+});
+
+test("manages a custom exact token and reloads the market-data chart", async ({ page }) => {
+  const requests: string[] = [];
+  await page.route("**/api/candles?**", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    const timeframe = requestUrl.searchParams.get("timeframe") ?? "1m";
+    requests.push(timeframe);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ...initialWindow, timeframe, next_cursor: null, has_more: false }),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("region", { name: "NDX 1m candlestick chart" })).toBeVisible();
+  await page.getByRole("button", { name: "Manage timeframes" }).click();
+  await page.getByRole("textbox", { name: "Custom timeframe" }).fill("2w");
+  await page.getByRole("button", { name: "Add timeframe" }).click();
+  await page.getByRole("button", { name: "2w timeframe" }).click();
+
+  await expect(page.getByRole("region", { name: "NDX 2w candlestick chart" })).toBeVisible();
+  expect(requests).toContain("2w");
+});
+
+test("clicks an overlapping timeframe favorite control", async ({ page }) => {
+  await page.route("**/api/candles?**", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(initialWindow) }),
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Manage timeframes" }).click();
+  await page.getByRole("button", { name: "Unfavorite 1m" }).click();
+
+  await expect(page.getByRole("button", { exact: true, name: "Favorite 1m" })).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Favorite timeframes" }).getByRole("button", { name: "1m timeframe, selected" }),
+  ).not.toBeVisible();
 });

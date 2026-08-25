@@ -85,8 +85,8 @@ test("discovers strategies, submits the shared timeframe and period, and display
   );
 
   renderApp();
-  const timeframe = await screen.findByRole("combobox", { name: "Timeframe" });
-  fireEvent.change(timeframe, { target: { value: "5m" } });
+  await screen.findByRole("button", { name: "1m timeframe, selected" });
+  fireEvent.click(screen.getByRole("button", { name: "5m timeframe" }));
   await screen.findByText("No NDX 5m candles are available.");
   fireEvent.click(screen.getByRole("tab", { name: "Backtest" }));
 

@@ -182,12 +182,12 @@ def test_backtest_result_is_deterministic_and_typed(analysis_client: TestClient)
         "total_trades",
     }
     assert body["symbol"] == "NDX"
-    assert body["timeframe"] == "1m"
+    assert body["timeframe"] == "1M"
     assert body["start_datetime"] == "2025-01-01T00:00:00"
-    assert body["end_datetime"] == "2025-01-01T00:09:00"
-    assert body["candle_count"] == 10
+    assert body["end_datetime"] == "2025-01-01T00:00:00"
+    assert body["candle_count"] == 1
     assert body["initial_cash"] == 1000.0
-    assert body["total_trades"] == 2
+    assert body["total_trades"] == 0
 
 
 def test_backtest_range_is_inclusive(analysis_client: TestClient) -> None:
@@ -297,7 +297,7 @@ def test_backtest_period_endpoint_returns_timeframe_aware_bounds(
     "params",
     [
         {"symbol": "SPX", "timeframe": "1m"},
-        {"symbol": "NDX", "timeframe": "1d"},
+            {"symbol": "NDX", "timeframe": "1H"},
     ],
 )
 def test_backtest_period_endpoint_preserves_typed_input_errors(
@@ -313,7 +313,7 @@ def test_backtest_period_endpoint_preserves_typed_input_errors(
     ("payload", "expected_status"),
     [
         ({"symbol": "SPX"}, 400),
-        ({"symbol": "NDX", "timeframe": "1d"}, 400),
+            ({"symbol": "NDX", "timeframe": "1H"}, 400),
         ({"symbol": "NDX", "initial_cash": 0}, 422),
         ({"symbol": "NDX", "fees": -0.1}, 422),
         ({"symbol": "NDX", "slippage": -0.1}, 422),

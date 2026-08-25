@@ -1,14 +1,10 @@
-# timeframe-selection Specification
+# Delta for timeframe-selection
 
-## Purpose
-
-Define the TimeframeSelector UI component that lets users switch between aggregation intervals, and the `/timeframes` API endpoint that supplies the available options.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: API exposes available timeframes
 
-The system MUST expose `GET /timeframes` as a JSON array containing supported case-sensitive units and catalog values. The catalog MUST include seeded values for `m`, `h`, and `d`, and MUST identify `w` and `M` as supported units.
+The system MUST expose `GET /timeframes` as a JSON array containing the supported case-sensitive units and catalog values. The catalog MUST include valid seeded values for `m`, `h`, and `d`, and MUST identify `w` and `M` as supported units.
 (Previously: the endpoint returned only `1m`, `5m`, `15m`, and `1h`.)
 
 #### Scenario: Catalog is requested
@@ -60,19 +56,3 @@ Changing the selected timeframe MUST produce a distinct React Query cache key, i
 - GIVEN candles are loaded at `1m` with a cursor
 - WHEN the user selects `1h`
 - THEN a fresh `1h` query starts and old `1m` candles are not displayed
-
-### Requirement: Timeframes fetched on mount with fallback
-
-The component MUST fetch available timeframes from `GET /timeframes` via React Query on mount. The query SHOULD have a stale time of at least 5 minutes. If the fetch fails, the component MUST fall back to `["1m", "5m", "15m", "1h"]` and log the error.
-
-#### Scenario: Fetch succeeds
-- GIVEN the component mounts
-- WHEN the `GET /timeframes` request completes
-- THEN the select populates with the API response values
-
-#### Scenario: Fetch fails with network error
-- GIVEN the component mounts
-- WHEN the `GET /timeframes` request fails
-- THEN the select populates with the hardcoded fallback `["1m", "5m", "15m", "1h"]`
-- AND the error is logged to the console
-- AND no error toast is shown to the user
