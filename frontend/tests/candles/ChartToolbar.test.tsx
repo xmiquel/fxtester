@@ -9,6 +9,12 @@ const preferences: ChartTimeframePreferences = {
   favorites: ["15m", "3h"],
 };
 
+const symbolSelector = {
+  onSelect: vi.fn(),
+  selectedSymbol: "AAPL",
+  symbols: ["AAPL", "MSFT"],
+};
+
 test("renders accessible favorite buttons with exact selected state", () => {
   render(
     <ChartToolbar
@@ -17,6 +23,7 @@ test("renders accessible favorite buttons with exact selected state", () => {
       onSelect={vi.fn()}
       preferences={preferences}
       selectedTimeframe="3h"
+      symbolSelector={symbolSelector}
     />,
   );
 
@@ -36,6 +43,7 @@ test("selects a favorite and supports keyboard star toggling", () => {
       onSelect={onSelect}
       preferences={preferences}
       selectedTimeframe="15m"
+      symbolSelector={symbolSelector}
     />,
   );
 
@@ -59,6 +67,7 @@ test("adds a valid custom token immediately and rejects invalid input", () => {
       onSelect={vi.fn()}
       preferences={preferences}
       selectedTimeframe="15m"
+      symbolSelector={symbolSelector}
     />,
   );
 
@@ -85,6 +94,7 @@ test("returns focus to manage control when the panel closes", () => {
       onSelect={vi.fn()}
       preferences={preferences}
       selectedTimeframe="15m"
+      symbolSelector={symbolSelector}
     />,
   );
 
@@ -92,4 +102,21 @@ test("returns focus to manage control when the panel closes", () => {
   fireEvent.click(manage);
   fireEvent.click(screen.getByRole("button", { name: "Close timeframe management" }));
   expect(document.activeElement).toBe(manage);
+});
+
+test("places the symbol selector before favorite timeframe controls", () => {
+  render(
+    <ChartToolbar
+      chartId="primary"
+      onChange={vi.fn()}
+      onSelect={vi.fn()}
+      preferences={preferences}
+      selectedTimeframe="15m"
+      symbolSelector={symbolSelector}
+    />,
+  );
+
+  const selector = screen.getByRole("button", { name: "Market symbol" });
+  const favorites = screen.getByRole("group", { name: "Favorite timeframes" });
+  expect(selector.compareDocumentPosition(favorites) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

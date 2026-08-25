@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw";
 import { expect, test, vi } from "vitest";
 
 import { App } from "../../src/App";
+import { chartTimeframeStorageKey } from "../../src/features/candles/chartTimeframePreferences";
 import { server } from "../mocks/server";
 
 vi.mock("lightweight-charts", () => ({
@@ -154,4 +155,30 @@ test("shows an accessible ordering error without submitting an invalid range", a
     "Start date must be before or equal to end date.",
   );
   expect(requests).toHaveLength(0);
+});
+
+test("keeps Backtest symbol selection parent-controlled without changing chart preferences", async () => {
+  server.use(
+    http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["NDX", "SPX"] })),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m"])),
+    http.get("*/api/candles", ({ request }) => {
+      const symbol = new URL(request.url).searchParams.get("symbol") ?? "NDX";
+      return HttpResponse.json({ candles: [], has_more: false, next_cursor: null, symbol, timeframe: "1m" });
+    }),
+    http.get("*/api/backtests/strategies", () => HttpResponse.json([{ name: "sma", label: "SMA", description: "", parameters: [] }])),
+    http.get("*/api/backtests/period", () =>
+      HttpResponse.json({ start_datetime: "2025-01-01T00:00:00", end_datetime: "2025-01-01T01:00:00" }),
+    ),
+  );
+
+  renderApp();
+  fireEvent.click(await screen.findByRole("tab", { name: "Backtest" }));
+  await screen.findByRole("heading", { name: "Backtest a strategy" });
+  const storedBefore = localStorage.getItem(chartTimeframeStorageKey("primary-market-data"));
+  fireEvent.click(screen.getByRole("button", { name: "Market symbol" }));
+  fireEvent.click(screen.getByRole("option", { name: "SPX" }));
+
+  await screen.findByRole("heading", { name: "Backtest a strategy" });
+  expect(screen.getByRole("button", { name: "Market symbol" })).toHaveTextContent("SPX");
+  expect(localStorage.getItem(chartTimeframeStorageKey("primary-market-data"))).toBe(storedBefore);
 });

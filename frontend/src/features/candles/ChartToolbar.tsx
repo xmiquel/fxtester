@@ -5,6 +5,7 @@ import {
   parseTimeframe,
   type ChartTimeframePreferences,
 } from "./chartTimeframePreferences";
+import { SymbolSelector, type SymbolSelectorProps } from "./SymbolSelector";
 
 interface ChartToolbarProps {
   chartId: string;
@@ -12,9 +13,17 @@ interface ChartToolbarProps {
   selectedTimeframe: string;
   onSelect: (token: string) => void;
   onChange: (next: ChartTimeframePreferences) => void;
+  symbolSelector: SymbolSelectorProps;
 }
 
-export function ChartToolbar({ chartId, preferences, selectedTimeframe, onSelect, onChange }: ChartToolbarProps) {
+export function ChartToolbar({
+  chartId,
+  preferences,
+  selectedTimeframe,
+  onSelect,
+  onChange,
+  symbolSelector,
+}: ChartToolbarProps) {
   const [isManageOpen, setIsManageOpen] = useState(false);
   const [customTimeframe, setCustomTimeframe] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -56,6 +65,7 @@ export function ChartToolbar({ chartId, preferences, selectedTimeframe, onSelect
 
   return (
     <section aria-label="Chart timeframe toolbar" className="timeframe-toolbar" data-chart-id={chartId} role="region">
+      <SymbolSelector {...symbolSelector} />
       <div aria-label="Favorite timeframes" className="timeframe-favorites" role="group">
         {preferences.favorites.map((timeframe) => {
           const selected = timeframe === selectedTimeframe;

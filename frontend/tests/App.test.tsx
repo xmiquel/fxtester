@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { App } from "../src/App";
+import { chartTimeframeStorageKey } from "../src/features/candles/chartTimeframePreferences";
 import { server } from "./mocks/server";
 
 vi.mock("lightweight-charts", () => ({
@@ -44,13 +45,43 @@ test("selects the first catalog symbol and isolates the next candle request by s
 
   renderApp();
 
-  const selector = await screen.findByRole("combobox", { name: "Market symbol" });
-  expect(selector).toHaveValue("DAX");
+  const selector = await screen.findByRole("button", { name: "Market symbol" });
+  expect(selector).toHaveTextContent("DAX");
   await screen.findByText("No DAX 1m candles are available.");
-  fireEvent.change(selector, { target: { value: "SPX" } });
+  fireEvent.click(selector);
+  fireEvent.click(screen.getByRole("option", { name: "SPX" }));
   await screen.findByText("No SPX 1m candles are available.");
 
   expect(candleSymbols).toEqual(["DAX", "SPX"]);
+});
+
+test("restores a valid chart symbol and timeframe preferences without sharing storage", async () => {
+  localStorage.setItem(
+    chartTimeframeStorageKey("primary-market-data"),
+    JSON.stringify({ version: 2, available: ["1m", "5m"], favorites: ["5m"], selectedSymbol: "SPX" }),
+  );
+  const requests: Array<{ symbol: string; timeframe: string }> = [];
+  server.use(
+    http.get("*/api/symbols", () => HttpResponse.json({ symbols: ["DAX", "SPX"] })),
+    http.get("*/api/timeframes", () => HttpResponse.json(["1m", "5m"])),
+    http.get("*/api/candles", ({ request }) => {
+      const url = new URL(request.url);
+      requests.push({ symbol: url.searchParams.get("symbol") ?? "", timeframe: url.searchParams.get("timeframe") ?? "" });
+      return HttpResponse.json({ candles: [], has_more: false, next_cursor: null, symbol: "SPX", timeframe: "1m" });
+    }),
+  );
+
+  renderApp();
+
+  expect(await screen.findByRole("button", { name: "Market symbol" })).toHaveTextContent("SPX");
+  expect(await screen.findByRole("button", { name: "5m timeframe" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "5m timeframe" }));
+  await screen.findByText("No SPX 5m candles are available.");
+  expect(JSON.parse(localStorage.getItem(chartTimeframeStorageKey("primary-market-data")) ?? "{}")).toMatchObject({
+    selectedSymbol: "SPX",
+    favorites: ["5m"],
+  });
+  expect(requests[0]).toEqual({ symbol: "SPX", timeframe: "1m" });
 });
 
 test("renders favorite timeframe toolbar and switches timeframe", async () => {

@@ -17,7 +17,7 @@ type ParameterValue = StrategyParameterDefinition["default"];
 interface BacktestPageProps {
   selectedSymbol: string;
   selectedTimeframe: string;
-  symbols: string[];
+  symbols: readonly string[];
   timeframes: string[];
   onSelectSymbol: (symbol: string) => void;
   onSelectTimeframe: (timeframe: string) => void;
