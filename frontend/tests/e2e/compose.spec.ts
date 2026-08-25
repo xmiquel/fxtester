@@ -67,7 +67,7 @@ test("Compose serves an executed React chart with a selected catalog symbol", as
   }
 
   await expect(page.getByRole("heading", { name: "Trading Terminal" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Market symbol" })).toHaveValue(selectedSymbol);
+  await expect(page.getByRole("button", { name: "Market symbol" })).toContainText(selectedSymbol);
   const chartHistory = page.getByTestId("chart-history");
   await expect(chartHistory).toHaveAttribute("data-candle-datetimes", /.+/);
   const renderedDatetimes = (await chartHistory.getAttribute("data-candle-datetimes"))?.split(",") ?? [];
