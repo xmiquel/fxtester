@@ -1,13 +1,16 @@
 import { useEffect, useRef } from "react";
 
 const TIMEFRAME_INPUT_UNIT = {
+  CALENDAR_MONTHS: "M",
+  DAYS: "d",
   HOURS: "h",
   MINUTES: "m",
+  WEEKS: "w",
 } as const;
 
-const TIMEFRAME_INPUT_KEY_PATTERN = /^[0-9mh]$/i;
-const TIMEFRAME_INPUT_PREFIX_PATTERN = /^[1-9]\d*[mh]?$/i;
-const TIMEFRAME_TOKEN_PATTERN = /^[1-9]\d*[mh]$/i;
+const TIMEFRAME_INPUT_KEY_PATTERN = /^[0-9mhdwM]$/;
+const TIMEFRAME_INPUT_PREFIX_PATTERN = /^[1-9]\d*[mhdwM]?$/;
+const TIMEFRAME_TOKEN_PATTERN = /^[1-9]\d*[mhdwM]$/;
 const TIMEFRAME_INPUT_TIMEOUT_MS = 1000;
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -19,26 +22,24 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function appendTimeframeInput(currentInput: string, key: string): string {
-  const normalizedKey = key.toLowerCase();
-  if (!TIMEFRAME_INPUT_KEY_PATTERN.test(normalizedKey)) {
+  if (!TIMEFRAME_INPUT_KEY_PATTERN.test(key)) {
     return currentInput;
   }
 
-  const candidate = `${currentInput}${normalizedKey}`;
+  const candidate = `${currentInput}${key}`;
   if (TIMEFRAME_INPUT_PREFIX_PATTERN.test(candidate)) {
     return candidate;
   }
 
-  return /^\d$/.test(normalizedKey) ? normalizedKey : "";
+  return /^\d$/.test(key) ? key : "";
 }
 
 export function parseTimeframeToken(input: string): string | null {
-  const normalizedInput = input.toLowerCase();
-  if (!TIMEFRAME_TOKEN_PATTERN.test(normalizedInput)) {
+  if (!TIMEFRAME_TOKEN_PATTERN.test(input)) {
     return null;
   }
 
-  return normalizedInput;
+  return input;
 }
 
 export function useTimeframeKeyboard(onSelect: (timeframe: string) => void): void {

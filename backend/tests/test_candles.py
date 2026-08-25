@@ -288,7 +288,10 @@ def test_openapi_documents_invalid_candle_parameters(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("timeframe", ["0m", "1.5h", "-1m", "1d", "1", "m", "01m"])
+@pytest.mark.parametrize(
+    "timeframe",
+    ["0m", "1.5h", "-1m", "1H", "1W", "1", "m", "01m", "1mm"],
+)
 def test_invalid_timeframe_is_rejected(tmp_path: Path, timeframe: str) -> None:
     database = tmp_path / "market.duckdb"
     make_database(str(database), count=1)
@@ -302,13 +305,13 @@ def test_invalid_timeframe_is_rejected(tmp_path: Path, timeframe: str) -> None:
         "title": "Unsupported candle timeframe",
         "detail": (
             f"Unsupported timeframe '{timeframe}'. "
-            "Expected a positive integer followed by 'm' or 'h'."
+            "Expected a positive integer followed by 'm', 'h', 'd', 'w', or 'M'."
         ),
         "timeframe": timeframe,
     }
 
 
-@pytest.mark.parametrize("timeframe", ["1m", "2m", "5m", "15m", "1h"])
+@pytest.mark.parametrize("timeframe", ["1m", "2m", "5m", "15m", "1h", "1d", "1w", "1M"])
 def test_supported_timeframes_return_200(tmp_path: Path, timeframe: str) -> None:
     database = tmp_path / "market.duckdb"
     # Insert enough 1m rows (at least 60 for 1h aggregation)
@@ -330,19 +333,19 @@ def test_supported_timeframes_return_200(tmp_path: Path, timeframe: str) -> None
         assert candle["symbol"] == "NDX"
 
 
-def test_custom_timeframe_is_case_insensitive_and_canonicalized(tmp_path: Path) -> None:
+def test_custom_timeframe_preserves_case_and_rejects_wrong_case(tmp_path: Path) -> None:
     database = tmp_path / "market.duckdb"
-    source = make_aggregation_database(str(database))
+    make_aggregation_database(str(database))
     client = TestClient(create_app(DuckDbCandleRepository(database)))
 
     response = client.get("/candles", params={"symbol": "NDX", "timeframe": "3H"})
 
-    assert response.status_code == 200
-    assert response.json()["timeframe"] == "3h"
-    expected = expected_aggregated_candles(source, 180)
-    assert [candle["datetime"] for candle in response.json()["candles"]] == [
-        candle["datetime"] for candle in expected
-    ]
+    assert response.status_code == 400
+    assert response.json()["timeframe"] == "3H"
+
+    month_response = client.get("/candles", params={"symbol": "NDX", "timeframe": "1M"})
+    assert month_response.status_code == 200
+    assert month_response.json()["timeframe"] == "1M"
 
 
 @pytest.mark.parametrize(
@@ -607,7 +610,103 @@ def test_timeframes_endpoint(tmp_path: Path) -> None:
     response = client.get("/timeframes")
 
     assert response.status_code == 200
-    assert response.json() == ["1m", "2m", "5m", "15m", "1h"]
+    assert response.json() == ["1m", "2m", "5m", "15m", "1h", "1d", "1w", "1M"]
+
+
+def make_calendar_database(path: str) -> None:
+    connection = duckdb.connect(path)
+    connection.execute(
+        '''CREATE TABLE dt_ohlc_m1 (
+            datetime TIMESTAMP, symbol VARCHAR, "OPEN" DOUBLE, high DOUBLE,
+            low DOUBLE, "close" DOUBLE, tickvol BIGINT, volume BIGINT,
+            spread BIGINT, origen VARCHAR, fecha_carga TIMESTAMP
+        )'''
+    )
+    timestamps = [
+        datetime(2025, 3, 8, 23, 59),
+        datetime(2025, 3, 9, 0, 0),
+        datetime(2025, 3, 9, 1, 59),
+        datetime(2025, 3, 9, 3, 0),
+        datetime(2025, 3, 10, 0, 0),
+        datetime(2025, 3, 31, 23, 59),
+        datetime(2025, 4, 1, 0, 0),
+    ]
+    connection.executemany(
+        "INSERT INTO dt_ohlc_m1 VALUES (?, 'NDX', ?, ?, ?, ?, ?, ?, 1, 'calendar', ?)",
+        [
+            (timestamp, index, index + 1, index - 1, index + 2, 1, 1, timestamp)
+            for index, timestamp in enumerate(timestamps)
+        ],
+    )
+    connection.close()
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "expected_datetimes"),
+    [
+        (
+            "1d",
+            [
+                "2025-03-08T00:00:00",
+                "2025-03-09T00:00:00",
+                "2025-03-10T00:00:00",
+                "2025-03-31T00:00:00",
+                "2025-04-01T00:00:00",
+            ],
+        ),
+        ("1w", ["2025-03-03T00:00:00", "2025-03-10T00:00:00", "2025-03-31T00:00:00"]),
+        ("1M", ["2025-03-01T00:00:00", "2025-04-01T00:00:00"]),
+    ],
+)
+def test_calendar_timeframes_use_raw_timestamp_boundaries(
+    tmp_path: Path, timeframe: str, expected_datetimes: list[str]
+) -> None:
+    database = tmp_path / "market.duckdb"
+    make_calendar_database(str(database))
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.get("/candles", params={"symbol": "NDX", "timeframe": timeframe})
+
+    assert response.status_code == 200
+    assert [candle["datetime"] for candle in response.json()["candles"]] == expected_datetimes
+
+
+def test_calendar_cursor_keeps_raw_wall_clock_without_timezone_conversion(tmp_path: Path) -> None:
+    database = tmp_path / "market.duckdb"
+    make_calendar_database(str(database))
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    response = client.get(
+        "/candles",
+        params={
+            "symbol": "NDX",
+            "timeframe": "1d",
+            "cursor": "2025-03-10T04:00:00-04:00",
+            "limit": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    assert [candle["datetime"] for candle in response.json()["candles"]] == [
+        "2025-03-08T00:00:00",
+        "2025-03-09T00:00:00",
+    ]
+
+
+def test_custom_timeframe_cursor_isolated_by_symbol_and_exact_timeframe(tmp_path: Path) -> None:
+    database = tmp_path / "market.duckdb"
+    make_database(str(database), count=120)
+    insert_symbols(str(database), ["SPX"])
+    client = TestClient(create_app(DuckDbCandleRepository(database)))
+
+    ndx = client.get("/candles", params={"symbol": "NDX", "timeframe": "3m", "limit": 2}).json()
+    spx = client.get("/candles", params={"symbol": "SPX", "timeframe": "1h", "limit": 2}).json()
+
+    assert ndx["symbol"] == "NDX"
+    assert ndx["timeframe"] == "3m"
+    assert len(ndx["candles"]) <= 1000
+    assert spx["symbol"] == "SPX"
+    assert spx["timeframe"] == "1h"
 
 
 def test_cursor_windows_are_ordered_and_non_overlapping(tmp_path: Path) -> None:

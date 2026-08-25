@@ -5,6 +5,7 @@ button { background: #3b82f6; border: 0; border-radius: 6px; color: #fff; cursor
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 button[aria-selected="false"] { background: #17243a; color: #aebed5; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
+button[aria-pressed="false"] { background: #17243a; color: #aebed5; }
 .terminal-shell { padding: 2rem; width: 100%; }
 .terminal-header, .chart-toolbar { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }
 .terminal-header { border-bottom: 1px solid #223047; margin-bottom: 1.5rem; }
@@ -32,6 +33,21 @@ h1, h2 { margin: 0.25rem 0 1rem; }
 .metric-card dt { color: #8da1bd; font-size: 0.8rem; }
 .metric-card dd { color: #e8eef8; font-size: 1rem; margin: 0.35rem 0 0; overflow-wrap: anywhere; }
 .chart-panel { background: #101827; border: 1px solid #223047; border-radius: 10px; padding: 1rem; }
+.timeframe-toolbar { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0 1rem; position: relative; }
+.timeframe-favorites { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.timeframe-favorites button { min-width: 3rem; padding: 0.45rem 0.65rem; }
+.timeframe-manage-button { background: #17243a; border: 1px solid #355071; }
+.timeframe-management { background: #101827; border: 1px solid #355071; border-radius: 8px; box-shadow: 0 12px 28px #0008; display: grid; gap: 1rem; left: 0; max-width: 32rem; padding: 1rem; position: absolute; top: calc(100% + 0.5rem); width: min(100%, 32rem); z-index: 10; }
+.timeframe-management h2 { font-size: 1rem; margin: 0; }
+.timeframe-management-header, .timeframe-management-header > button { align-items: center; display: flex; justify-content: space-between; }
+.timeframe-management-header > button { background: #17243a; border: 1px solid #355071; padding: 0.35rem 0.55rem; }
+.timeframe-available-list { display: grid; gap: 0.4rem; list-style: none; margin: 0; padding: 0; }
+.timeframe-available-list li { align-items: center; border-bottom: 1px solid #223047; display: flex; justify-content: space-between; padding: 0.25rem 0; }
+.timeframe-available-list button { background: transparent; font-size: 1.35rem; line-height: 1; padding: 0.2rem 0.45rem; }
+.custom-timeframe-form { display: grid; gap: 0.4rem; }
+.custom-timeframe-form > div { display: flex; gap: 0.5rem; }
+.custom-timeframe-form input { background: #17243a; border: 1px solid #355071; border-radius: 6px; color: #e8eef8; min-height: 2.5rem; min-width: 0; padding: 0.55rem 0.65rem; width: 100%; }
+.custom-timeframe-form p { margin: 0; }
 .chart-content { align-items: stretch; display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr) minmax(0, 12rem); }
 .chart-canvas { min-height: 440px; min-width: 0; width: 100%; }
 .chart-canvas:focus-visible { outline: 2px solid #60a5fa; outline-offset: 3px; }
@@ -47,4 +63,5 @@ h1, h2 { margin: 0.25rem 0 1rem; }
   .form-grid, .result-grid { grid-template-columns: minmax(0, 1fr); }
   .chart-content { grid-template-columns: minmax(0, 1fr); }
   .data-window { max-width: none; }
+  .custom-timeframe-form > div { align-items: stretch; flex-direction: column; }
 }
